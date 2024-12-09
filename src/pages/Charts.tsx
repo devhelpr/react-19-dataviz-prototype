@@ -60,7 +60,7 @@ function Charts({ data }: ChartsProps) {
         [0, 0],
         [width, height],
       ])
-      .on("brush end", (event) => {
+      .on("end", (event) => {
         if (!event.selection) return;
         const [x0, x1] = event.selection;
         const newDates: [Date, Date] = [x.invert(x0), x.invert(x1)];
@@ -99,7 +99,7 @@ function Charts({ data }: ChartsProps) {
       .attr("fill", "#4ecdc4")
       .attr("stroke", "#2c8c85")
       .attr("stroke-width", 1)
-      .attr("cursor", "ew-resize");
+      .style("pointer-events", "all");
 
     brushGroup
       .selectAll(".selection")
@@ -107,10 +107,12 @@ function Charts({ data }: ChartsProps) {
       .attr("fill-opacity", 0.2)
       .attr("stroke", "#4ecdc4")
       .attr("stroke-width", 1)
-      .attr("cursor", "grab");
+      .style("pointer-events", "all");
 
-    brush.on("brush.handle", null);
-  }, [data, dateRange]);
+    brushGroup
+      .select(".overlay")
+      .style("pointer-events", "all");
+  }, [data]);
 
   // Main chart effect
   useEffect(() => {
