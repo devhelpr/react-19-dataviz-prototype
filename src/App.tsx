@@ -9,6 +9,7 @@ import { useState } from "react";
 import Charts from "./pages/Charts";
 import DataTable from "./pages/DataTable";
 import { generateData } from "./utils/data";
+import SyntheticData from "./pages/SyntheticData";
 
 function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
   const location = useLocation();
@@ -49,6 +50,7 @@ function Navigation({
               <div className="flex space-x-4">
                 <NavLink to="/">Charts</NavLink>
                 <NavLink to="/data">Data Table</NavLink>
+                <NavLink to="/synthetic">Synthetic Data</NavLink>
               </div>
             </div>
           </div>
@@ -117,6 +119,13 @@ function Navigation({
           >
             Data Table
           </Link>
+          <Link
+            to="/synthetic"
+            className="block px-3 py-2 rounded-md text-base font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+            onClick={() => setIsMenuOpen(false)}
+          >
+            Synthetic Data
+          </Link>
         </div>
       </div>
     </nav>
@@ -136,6 +145,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Charts data={data} />} />
           <Route path="/data" element={<DataTable data={data} />} />
+          <Route path="/synthetic" element={<SyntheticData data={data} />} />
         </Routes>
       </main>
     </div>
