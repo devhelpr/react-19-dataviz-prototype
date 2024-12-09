@@ -263,21 +263,162 @@ interface ColumnSelection {
   category?: string;
 }
 
+interface ColumnData {
+  name: string;
+  type: "numeric" | "date" | "categorical";
+  values: (number | Date | string)[];
+}
+
+interface CorrelationResult {
+  column: string;
+  correlation: number;
+}
+
+function detectColumnType(
+  values: string[]
+): "numeric" | "date" | "categorical" {
+  // Try to detect if it's a numeric column
+  const numericCount = values.filter((v) => !isNaN(parseFloat(v))).length;
+  if (numericCount / values.length > 0.8) return "numeric";
+
+  // Try to detect if it's a date column
+  const dateCount = values.filter((v) => !isNaN(new Date(v).getTime())).length;
+  if (dateCount / values.length > 0.8) return "date";
+
+  // Default to categorical
+  return "categorical";
+}
+
+function parseColumns(csvText: string): ColumnData[] {
+  const lines = csvText.split("\n");
+  const headers = lines[0].split(",").map((h) => h.trim());
+  const columns: ColumnData[] = headers.map((h) => ({
+    name: h,
+    type: "categorical",
+    values: [],
+  }));
+
+  // Parse values for each column
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(",").map((v) => v.trim());
+    if (values.length !== headers.length) continue;
+
+    values.forEach((value, colIndex) => {
+      columns[colIndex].values.push(value);
+    });
+  }
+
+  // Detect column types and convert values
+  columns.forEach((column) => {
+    const sampleValues = column.values.slice(0, 100);
+    column.type = detectColumnType(sampleValues);
+
+    // Convert values based on type
+    column.values = column.values.map((value) => {
+      if (column.type === "numeric") {
+        return parseFloat(value) || 0;
+      } else if (column.type === "date") {
+        return new Date(value);
+      }
+      return value;
+    });
+  });
+
+  return columns;
+}
+
+function generateSyntheticColumns(columns: ColumnData[]): ColumnData[] {
+  return columns.map((column) => {
+    const syntheticValues = [];
+    const length = column.values.length;
+
+    if (column.type === "numeric") {
+      const values = column.values as number[];
+      const mean = d3.mean(values) || 0;
+      const std = d3.deviation(values) || 1;
+
+      for (let i = 0; i < length; i++) {
+        syntheticValues.push(d3.randomNormal(mean, std)());
+      }
+    } else if (column.type === "date") {
+      const dates = column.values as Date[];
+      const minTime = Math.min(...dates.map((d) => d.getTime()));
+      const maxTime = Math.max(...dates.map((d) => d.getTime()));
+
+      for (let i = 0; i < length; i++) {
+        syntheticValues.push(
+          new Date(minTime + Math.random() * (maxTime - minTime))
+        );
+      }
+    } else {
+      const categories = Array.from(new Set(column.values));
+      const distribution = categories.map(
+        (cat) => column.values.filter((v) => v === cat).length / length
+      );
+
+      for (let i = 0; i < length; i++) {
+        const rand = Math.random();
+        let cumSum = 0;
+        for (let j = 0; j < categories.length; j++) {
+          cumSum += distribution[j];
+          if (rand <= cumSum) {
+            syntheticValues.push(categories[j]);
+            break;
+          }
+        }
+      }
+    }
+
+    return {
+      name: column.name,
+      type: column.type,
+      values: syntheticValues,
+    };
+  });
+}
+
+function calculateColumnCorrelation(
+  original: ColumnData,
+  synthetic: ColumnData
+): number {
+  if (original.type === "numeric") {
+    return calculatePearsonCorrelation(
+      original.values as number[],
+      synthetic.values as number[]
+    );
+  } else if (original.type === "date") {
+    const origTimes = (original.values as Date[]).map((d) => d.getTime());
+    const synthTimes = (synthetic.values as Date[]).map((d) => d.getTime());
+    return calculatePearsonCorrelation(origTimes, synthTimes);
+  } else {
+    const categories = Array.from(
+      new Set([...original.values, ...synthetic.values])
+    );
+    const origDist = calculateCategoryDistribution(
+      original.values as string[],
+      categories
+    );
+    const synthDist = calculateCategoryDistribution(
+      synthetic.values as string[],
+      categories
+    );
+    return calculatePearsonCorrelation(origDist, synthDist);
+  }
+}
+
+interface SelectedColumns {
+  [key: string]: boolean;
+}
+
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
-  const [data, setData] = useState<DataPoint[]>(initialData);
+  const [uploadedColumns, setUploadedColumns] = useState<ColumnData[]>([]);
+  const [syntheticColumns, setSyntheticColumns] = useState<ColumnData[]>([]);
+  const [correlations, setCorrelations] = useState<CorrelationResult[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
-  const [columnSelection, setColumnSelection] = useState<ColumnSelection>({});
-  const [csvText, setCsvText] = useState<string>("");
+  const [selectedColumns, setSelectedColumns] = useState<SelectedColumns>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const heatmapRef = useRef<SVGSVGElement>(null);
-
-  const syntheticData = useMemo(() => generateSyntheticData(data), [data]);
-  const correlations = useMemo(
-    () => calculateCorrelations(data, syntheticData),
-    [data, syntheticData]
-  );
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -288,131 +429,52 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     try {
       setError(null);
       const text = await file.text();
-      setCsvText(text);
+      const columns = parseColumns(text);
+      setUploadedColumns(columns);
 
-      // Extract headers
-      const headers = text
-        .split("\n")[0]
-        .split(",")
-        .map((h) => h.trim());
-      setCsvHeaders(headers);
-      setColumnSelection({});
+      // Initialize all columns as selected
+      const initialSelection = columns.reduce((acc, col) => {
+        acc[col.name] = true;
+        return acc;
+      }, {} as SelectedColumns);
+      setSelectedColumns(initialSelection);
 
-      // Try to auto-detect columns
-      headers.forEach((header) => {
-        const lowerHeader = header.toLowerCase();
-        if (lowerHeader.includes("date") || lowerHeader.includes("time")) {
-          setColumnSelection((prev) => ({ ...prev, date: header }));
-        } else if (
-          lowerHeader.includes("value") ||
-          lowerHeader.includes("amount")
-        ) {
-          setColumnSelection((prev) => ({ ...prev, value: header }));
-        } else if (
-          lowerHeader.includes("category") ||
-          lowerHeader.includes("type")
-        ) {
-          setColumnSelection((prev) => ({ ...prev, category: header }));
-        }
-      });
+      // Generate initial synthetic data for all columns
+      generateSyntheticData(columns);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error reading CSV file");
+      setError(err instanceof Error ? err.message : "Error processing file");
     }
   };
 
-  const handleColumnSelect = (type: keyof ColumnSelection, column: string) => {
-    setColumnSelection((prev) => ({ ...prev, [type]: column }));
+  const handleColumnToggle = (columnName: string) => {
+    setSelectedColumns((prev) => ({
+      ...prev,
+      [columnName]: !prev[columnName],
+    }));
   };
 
-  const handleGenerateData = () => {
-    try {
-      const parsedData = parseCSV(csvText, columnSelection);
-      if (parsedData.length === 0) {
-        throw new Error("No valid data found in CSV file");
-      }
-      setData(parsedData);
+  const generateSyntheticData = (columns: ColumnData[]) => {
+    // Filter selected columns
+    const selectedCols = columns.filter((col) => selectedColumns[col.name]);
 
-      // Reset file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error parsing CSV file");
-    }
+    // Generate synthetic data
+    const synthetic = generateSyntheticColumns(selectedCols);
+    setSyntheticColumns(synthetic);
+
+    // Calculate correlations
+    const newCorrelations = selectedCols.map((col, i) => ({
+      column: col.name,
+      correlation: calculateColumnCorrelation(col, synthetic[i]),
+    }));
+    setCorrelations(newCorrelations);
   };
 
-  // Heatmap effect
+  // Update synthetic data when column selection changes
   useEffect(() => {
-    if (!heatmapRef.current) return;
-
-    d3.select(heatmapRef.current).selectAll("*").remove();
-
-    const margin = { top: 30, right: 30, bottom: 30, left: 100 };
-    const width = 400 - margin.left - margin.right;
-    const height = 200 - margin.top - margin.bottom;
-
-    const svg = d3
-      .select(heatmapRef.current)
-      .attr("width", width + margin.left + margin.right)
-      .attr("height", height + margin.top + margin.bottom)
-      .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    // Create color scale
-    const colorScale = d3
-      .scaleSequential()
-      .domain([0, 1])
-      .interpolator(d3.interpolateViridis);
-
-    // Create scales
-    const xScale = d3.scaleBand().range([0, width]).domain(["Correlation"]);
-    const yScale = d3
-      .scaleBand()
-      .range([height, 0])
-      .domain(correlations.map((d) => d.label));
-
-    // Add rectangles
-    svg
-      .selectAll("rect")
-      .data(correlations)
-      .enter()
-      .append("rect")
-      .attr("x", xScale("Correlation"))
-      .attr("y", (d) => yScale(d.label) || 0)
-      .attr("width", xScale.bandwidth())
-      .attr("height", yScale.bandwidth())
-      .attr("fill", (d) => colorScale(d.correlation))
-      .attr("stroke", "white");
-
-    // Add labels
-    svg
-      .selectAll(".correlation-text")
-      .data(correlations)
-      .enter()
-      .append("text")
-      .attr("class", "correlation-text")
-      .attr("x", xScale("Correlation")! + xScale.bandwidth() / 2)
-      .attr("y", (d) => (yScale(d.label) || 0) + yScale.bandwidth() / 2)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .style("fill", "white")
-      .text((d) => d.correlation.toFixed(3));
-
-    // Add y axis
-    svg
-      .append("g")
-      .call(d3.axisLeft(yScale))
-      .call((g) => g.select(".domain").remove());
-
-    // Add title
-    svg
-      .append("text")
-      .attr("x", width / 2)
-      .attr("y", -10)
-      .attr("text-anchor", "middle")
-      .style("font-size", "14px")
-      .text("Real vs Synthetic Data Correlation");
-  }, [correlations]);
+    if (uploadedColumns.length > 0) {
+      generateSyntheticData(uploadedColumns);
+    }
+  }, [selectedColumns, uploadedColumns]);
 
   return (
     <div className="p-4">
@@ -433,142 +495,81 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
               className="hidden"
             />
           </label>
-          <button
-            onClick={() => setData(initialData)}
-            className="px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-          >
-            Reset to Default Data
-          </button>
         </div>
-
-        {/* Column Selection */}
-        {csvHeaders.length > 0 && (
-          <div className="mt-4 p-4 border rounded bg-gray-50">
-            <h3 className="font-semibold mb-3">Select Columns</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date Column
-                </label>
-                <select
-                  value={columnSelection.date || ""}
-                  onChange={(e) => handleColumnSelect("date", e.target.value)}
-                  className="w-full border rounded p-2"
-                >
-                  <option value="">Auto-detect</option>
-                  {csvHeaders.map((header) => (
-                    <option key={header} value={header}>
-                      {header}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Value Column
-                </label>
-                <select
-                  value={columnSelection.value || ""}
-                  onChange={(e) => handleColumnSelect("value", e.target.value)}
-                  className="w-full border rounded p-2"
-                >
-                  <option value="">Auto-detect</option>
-                  {csvHeaders.map((header) => (
-                    <option key={header} value={header}>
-                      {header}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Category Column
-                </label>
-                <select
-                  value={columnSelection.category || ""}
-                  onChange={(e) =>
-                    handleColumnSelect("category", e.target.value)
-                  }
-                  className="w-full border rounded p-2"
-                >
-                  <option value="">Auto-detect</option>
-                  {csvHeaders.map((header) => (
-                    <option key={header} value={header}>
-                      {header}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <button
-              onClick={handleGenerateData}
-              className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors"
-            >
-              Generate Synthetic Data
-            </button>
-          </div>
-        )}
 
         {error && <div className="mt-2 text-red-500 text-sm">{error}</div>}
-        <div className="mt-2 text-sm text-gray-600">
-          Upload any CSV file - select columns or let the system auto-detect:
-          <ul className="list-disc ml-5 mt-1">
-            <li>Date/time columns for temporal data</li>
-            <li>Numeric columns for values</li>
-            <li>Text columns for categories</li>
-            <li>Missing values will be automatically generated</li>
-          </ul>
-        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="border p-4 rounded">
-          <h3 className="text-lg font-bold mb-2">Correlation Heatmap</h3>
-          <svg ref={heatmapRef}></svg>
-        </div>
+      {/* Column Selection and Results */}
+      {uploadedColumns.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Column Selection */}
+          <div className="border p-4 rounded">
+            <h3 className="text-lg font-bold mb-3">
+              Select Columns for Synthesis
+            </h3>
+            <div className="space-y-2">
+              {uploadedColumns.map((col) => (
+                <div
+                  key={col.name}
+                  className="flex items-center justify-between"
+                >
+                  <label className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedColumns[col.name] || false}
+                      onChange={() => handleColumnToggle(col.name)}
+                      className="rounded text-blue-500"
+                    />
+                    <span>{col.name}</span>
+                  </label>
+                  <span className="text-sm text-gray-600 px-2 py-1 bg-gray-100 rounded">
+                    {col.type}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
 
-        <div className="border p-4 rounded">
-          <h3 className="text-lg font-bold mb-2">Statistics</h3>
-          <div className="space-y-4">
-            {["A", "B", "C"].map((category) => {
-              const realStats = data.filter((d) => d.category === category);
-              const synthStats = syntheticData.filter(
-                (d) => d.category === category
-              );
+          {/* Correlation Heatmap */}
+          <div className="border p-4 rounded">
+            <h3 className="text-lg font-bold mb-2">Correlation Heatmap</h3>
+            <svg ref={heatmapRef}></svg>
+          </div>
 
-              return (
-                <div key={category} className="space-y-2">
-                  <h4 className="font-semibold">Category {category}</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <p className="font-medium">Real Data:</p>
-                      <p>
-                        Mean: {d3.mean(realStats, (d) => d.value)?.toFixed(2)}
-                      </p>
-                      <p>
-                        Std:{" "}
-                        {d3.deviation(realStats, (d) => d.value)?.toFixed(2)}
-                      </p>
-                      <p>Count: {realStats.length}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium">Synthetic Data:</p>
-                      <p>
-                        Mean: {d3.mean(synthStats, (d) => d.value)?.toFixed(2)}
-                      </p>
-                      <p>
-                        Std:{" "}
-                        {d3.deviation(synthStats, (d) => d.value)?.toFixed(2)}
-                      </p>
-                      <p>Count: {synthStats.length}</p>
+          {/* Statistics */}
+          <div className="border p-4 rounded md:col-span-2">
+            <h3 className="text-lg font-bold mb-3">Column Statistics</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {uploadedColumns
+                .filter((col) => selectedColumns[col.name])
+                .map((col) => (
+                  <div key={col.name} className="p-3 bg-gray-50 rounded">
+                    <h4 className="font-semibold">{col.name}</h4>
+                    <div className="text-sm space-y-1 mt-2">
+                      <p>Type: {col.type}</p>
+                      {col.type === "numeric" && (
+                        <>
+                          <p>
+                            Mean: {d3.mean(col.values as number[])?.toFixed(2)}
+                          </p>
+                          <p>
+                            Std:{" "}
+                            {d3.deviation(col.values as number[])?.toFixed(2)}
+                          </p>
+                        </>
+                      )}
+                      {col.type === "categorical" && (
+                        <p>Categories: {new Set(col.values).size}</p>
+                      )}
+                      <p>Sample Size: {col.values.length}</p>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
