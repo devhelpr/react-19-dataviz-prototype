@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import * as d3 from "d3";
 import { DataPoint } from "../types";
 import { generateSyntheticData as generateCartSyntheticData } from "../utils/cart";
+import { FaSpinner } from "react-icons/fa";
 
 interface SyntheticDataProps {
   data: DataPoint[];
@@ -384,22 +385,30 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
     try {
       // Convert selected columns to DataPoint format for CART
+      const dateColumn = selectedCols.find((col) => col.type === "date");
+      const numericColumn = selectedCols.find((col) => col.type === "numeric");
+      const categoricalColumn = selectedCols.find(
+        (col) => col.type === "categorical"
+      );
+
       const dataPoints: DataPoint[] = Array.from(
         { length: selectedCols[0].values.length },
-        (_, i) => ({
-          date:
-            (selectedCols.find((col) => col.type === "date")?.values[
-              i
-            ] as Date) || new Date(),
-          value:
-            (selectedCols.find((col) => col.type === "numeric")?.values[
-              i
-            ] as number) || 0,
-          category:
-            (selectedCols.find((col) => col.type === "categorical")?.values[
-              i
-            ] as string) || "A",
-        })
+        (_, i) => {
+          // Generate reasonable defaults for missing types
+          const date = dateColumn
+            ? (dateColumn.values[i] as Date)
+            : new Date(Date.now() + i * 24 * 60 * 60 * 1000); // Sequential dates
+
+          const value = numericColumn
+            ? (numericColumn.values[i] as number)
+            : Math.random() * 100; // Random value between 0 and 100
+
+          const category = categoricalColumn
+            ? (categoricalColumn.values[i] as string)
+            : String.fromCharCode(65 + (i % 26)); // Cycle through A-Z
+
+          return { date, value, category };
+        }
       );
 
       // Generate synthetic data with progress updates
@@ -716,15 +725,20 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                 <button
                   onClick={handleGenerateSynthetic}
                   disabled={isGenerating}
-                  className={`w-full py-2 px-4 rounded font-medium ${
+                  className={`w-full py-2 px-4 rounded font-medium flex items-center justify-center space-x-2 ${
                     isGenerating
                       ? "bg-gray-300 cursor-not-allowed"
                       : "bg-green-500 hover:bg-green-600 text-white"
                   }`}
                 >
-                  {isGenerating
-                    ? `Generating... ${progress}%`
-                    : `Generate ${numRecords} Records`}
+                  {isGenerating && (
+                    <FaSpinner className="animate-spin h-5 w-5" />
+                  )}
+                  <span>
+                    {isGenerating
+                      ? `Generating... ${progress}%`
+                      : `Generate ${numRecords} Records`}
+                  </span>
                 </button>
               </div>
             </div>

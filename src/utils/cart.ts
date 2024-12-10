@@ -133,12 +133,16 @@ function pruneTree(node: TreeNode, alpha: number): TreeNode {
 function buildDecisionTree(
   data: DataPoint[],
   depth = 0,
-  maxDepth = 3,
-  minSamplesSplit = 10,
+  maxDepth = 5,
+  minSamplesSplit = 5,
   alpha = 0.01
 ): TreeNode {
+  // Always create a leaf node with the current data statistics
+  const leafNode = createLeafNode(data);
+
+  // Stop conditions
   if (depth === maxDepth || data.length < minSamplesSplit) {
-    return createLeafNode(data);
+    return leafNode;
   }
 
   // Find best split across all features
@@ -163,10 +167,10 @@ function buildDecisionTree(
 
   if (bestSplit.feature === "category") {
     leftData = data.filter(
-      (d) => (d.category <= bestSplit.threshold) as unknown as string
+      (d) => (d.category <= bestSplit.threshold) as string
     );
     rightData = data.filter(
-      (d) => (d.category > bestSplit.threshold) as unknown as string
+      (d) => (d.category > bestSplit.threshold) as string
     );
   } else {
     const threshold = bestSplit.threshold as number;
@@ -179,16 +183,22 @@ function buildDecisionTree(
     }
   }
 
-  // Check if split is worthwhile
-  if (leftData.length === 0 || rightData.length === 0) {
-    return createLeafNode(data);
+  // If split doesn't improve things, return leaf node
+  if (
+    leftData.length === 0 ||
+    rightData.length === 0 ||
+    bestSplit.score >= leafNode.impurity!
+  ) {
+    return leafNode;
   }
 
+  // Create the decision node
   const node: TreeNode = {
     feature: bestSplit.feature,
     threshold: bestSplit.threshold,
     impurity: bestSplit.score,
     samples: data.length,
+    value: leafNode.value, // Keep statistics at each node
     left: buildDecisionTree(
       leftData,
       depth + 1,
@@ -241,46 +251,47 @@ function createLeafNode(data: DataPoint[]): TreeNode {
   };
 }
 
+function generateDataPoint(node: TreeNode): DataPoint {
+  // Always have statistics available at the current node
+  if (!node.value) {
+    throw new Error("Node missing value statistics");
+  }
+
+  // If it's a leaf node or we randomly decide to use current node's statistics
+  if (
+    !node.left ||
+    !node.right ||
+    !node.feature ||
+    node.threshold === undefined ||
+    Math.random() < 0.2
+  ) {
+    // 20% chance to use current node
+    return {
+      category: node.value.category,
+      value: Math.max(
+        0,
+        d3.randomNormal(node.value.meanValue, node.value.stdValue)()
+      ),
+      date: new Date(
+        node.value.dateRange[0].getTime() +
+          Math.random() *
+            (node.value.dateRange[1].getTime() -
+              node.value.dateRange[0].getTime())
+      ),
+    };
+  }
+
+  // Otherwise, traverse the tree based on generated test values
+  const testValue = Math.random();
+  return generateDataPoint(testValue < 0.5 ? node.left : node.right);
+}
+
 function generateSyntheticDataFromTree(
   tree: TreeNode,
   targetSize: number
 ): DataPoint[] {
   const syntheticData: DataPoint[] = [];
   const batchSize = 1000; // Process in smaller batches
-
-  function generateDataPoint(node: TreeNode): DataPoint {
-    // If we hit a leaf node or a node without valid children, use its value
-    if (node.value || !node.left || !node.right) {
-      if (!node.value) {
-        // Fallback values if we somehow get a non-leaf node without children
-        return {
-          category: "A",
-          value: 0,
-          date: new Date(),
-        };
-      }
-
-      // Generate synthetic point from leaf node statistics
-      const value = Math.max(
-        0,
-        d3.randomNormal(node.value.meanValue, node.value.stdValue)()
-      );
-
-      const startTime = node.value.dateRange[0].getTime();
-      const timeRange = node.value.dateRange[1].getTime() - startTime;
-      const date = new Date(startTime + Math.random() * timeRange);
-
-      return {
-        category: node.value.category,
-        value,
-        date,
-      };
-    }
-
-    // If not a leaf node, randomly choose left or right branch
-    const nextNode = Math.random() < 0.5 ? node.left : node.right;
-    return generateDataPoint(nextNode);
-  }
 
   // Generate data in batches
   while (syntheticData.length < targetSize) {
