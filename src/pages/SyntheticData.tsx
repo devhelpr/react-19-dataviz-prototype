@@ -410,12 +410,22 @@ interface SelectedColumns {
   [key: string]: boolean;
 }
 
+interface MatrixCorrelation {
+  originalColumn: string;
+  syntheticColumn: string;
+  correlation: number;
+}
+
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
   const [uploadedColumns, setUploadedColumns] = useState<ColumnData[]>([]);
   const [syntheticColumns, setSyntheticColumns] = useState<ColumnData[]>([]);
   const [correlations, setCorrelations] = useState<CorrelationResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedColumns, setSelectedColumns] = useState<SelectedColumns>({});
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [matrixCorrelations, setMatrixCorrelations] = useState<
+    MatrixCorrelation[]
+  >([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const heatmapRef = useRef<SVGSVGElement>(null);
@@ -432,15 +442,16 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       const columns = parseColumns(text);
       setUploadedColumns(columns);
 
-      // Initialize all columns as selected
+      // Initialize all columns as unselected
       const initialSelection = columns.reduce((acc, col) => {
-        acc[col.name] = true;
+        acc[col.name] = false;
         return acc;
       }, {} as SelectedColumns);
       setSelectedColumns(initialSelection);
 
-      // Generate initial synthetic data for all columns
-      generateSyntheticData(columns);
+      // Clear previous results
+      setSyntheticColumns([]);
+      setCorrelations([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error processing file");
     }
@@ -453,28 +464,195 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     }));
   };
 
-  const generateSyntheticData = (columns: ColumnData[]) => {
-    // Filter selected columns
-    const selectedCols = columns.filter((col) => selectedColumns[col.name]);
+  const handleGenerateSynthetic = () => {
+    if (uploadedColumns.length === 0) {
+      setError("Please upload a CSV file first");
+      return;
+    }
 
-    // Generate synthetic data
-    const synthetic = generateSyntheticColumns(selectedCols);
-    setSyntheticColumns(synthetic);
+    const selectedCols = uploadedColumns.filter(
+      (col) => selectedColumns[col.name]
+    );
+    if (selectedCols.length === 0) {
+      setError("Please select at least one column");
+      return;
+    }
 
-    // Calculate correlations
-    const newCorrelations = selectedCols.map((col, i) => ({
-      column: col.name,
-      correlation: calculateColumnCorrelation(col, synthetic[i]),
-    }));
-    setCorrelations(newCorrelations);
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      // Generate synthetic data
+      const synthetic = generateSyntheticColumns(selectedCols);
+      setSyntheticColumns(synthetic);
+
+      // Calculate correlations
+      const newCorrelations = selectedCols.map((col, i) => ({
+        column: col.name,
+        correlation: calculateColumnCorrelation(col, synthetic[i]),
+      }));
+      setCorrelations(newCorrelations);
+
+      // Calculate matrix correlations
+      const matrixCorrelations: MatrixCorrelation[] = [];
+      selectedCols.forEach((origCol) => {
+        synthetic.forEach((synthCol) => {
+          matrixCorrelations.push({
+            originalColumn: `${origCol.name} (Original)`,
+            syntheticColumn: `${synthCol.name} (Synthetic)`,
+            correlation: calculateColumnCorrelation(origCol, synthCol),
+          });
+        });
+      });
+      setMatrixCorrelations(matrixCorrelations);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Error generating synthetic data"
+      );
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  // Update synthetic data when column selection changes
   useEffect(() => {
-    if (uploadedColumns.length > 0) {
-      generateSyntheticData(uploadedColumns);
-    }
-  }, [selectedColumns, uploadedColumns]);
+    if (!heatmapRef.current || matrixCorrelations.length === 0) return;
+
+    d3.select(heatmapRef.current).selectAll("*").remove();
+
+    const margin = { top: 50, right: 50, bottom: 50, left: 150 };
+    const size = Math.min(800, window.innerWidth - 100);
+    const width = size - margin.left - margin.right;
+    const height = size - margin.top - margin.bottom;
+
+    const svg = d3
+      .select(heatmapRef.current)
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Create color scale
+    const colorScale = d3
+      .scaleSequential()
+      .domain([-1, 1])
+      .interpolator(d3.interpolateRdYlBu);
+
+    // Get unique column names
+    const originalColumns = Array.from(
+      new Set(matrixCorrelations.map((d) => d.originalColumn))
+    );
+    const syntheticColumns = Array.from(
+      new Set(matrixCorrelations.map((d) => d.syntheticColumn))
+    );
+
+    // Create scales
+    const xScale = d3
+      .scaleBand()
+      .range([0, width])
+      .domain(syntheticColumns)
+      .padding(0.05);
+
+    const yScale = d3
+      .scaleBand()
+      .range([0, height])
+      .domain(originalColumns)
+      .padding(0.05);
+
+    // Add cells
+    svg
+      .selectAll("rect")
+      .data(matrixCorrelations)
+      .enter()
+      .append("rect")
+      .attr("x", (d) => xScale(d.syntheticColumn)!)
+      .attr("y", (d) => yScale(d.originalColumn)!)
+      .attr("width", xScale.bandwidth())
+      .attr("height", yScale.bandwidth())
+      .attr("fill", (d) => colorScale(d.correlation))
+      .attr("stroke", "white")
+      .attr("stroke-width", 1);
+
+    // Add correlation values
+    svg
+      .selectAll(".correlation-text")
+      .data(matrixCorrelations)
+      .enter()
+      .append("text")
+      .attr("class", "correlation-text")
+      .attr("x", (d) => xScale(d.syntheticColumn)! + xScale.bandwidth() / 2)
+      .attr("y", (d) => yScale(d.originalColumn)! + yScale.bandwidth() / 2)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .style("fill", (d) => (Math.abs(d.correlation) > 0.5 ? "white" : "black"))
+      .style("font-size", "10px")
+      .text((d) => d.correlation.toFixed(2));
+
+    // Add x axis
+    svg
+      .append("g")
+      .style("font-size", "10px")
+      .attr("transform", `translate(0,${height})`)
+      .call(d3.axisBottom(xScale))
+      .selectAll("text")
+      .attr("transform", "rotate(-45)")
+      .style("text-anchor", "end");
+
+    // Add y axis
+    svg.append("g").style("font-size", "10px").call(d3.axisLeft(yScale));
+
+    // Add title
+    svg
+      .append("text")
+      .attr("x", width / 2)
+      .attr("y", -20)
+      .attr("text-anchor", "middle")
+      .style("font-size", "14px")
+      .text("Correlation Matrix: Original vs Synthetic Data");
+
+    // Add color scale legend
+    const legendWidth = width;
+    const legendHeight = 10;
+
+    const legendScale = d3
+      .scaleLinear()
+      .domain([-1, 1])
+      .range([0, legendWidth]);
+
+    const legendAxis = d3
+      .axisBottom(legendScale)
+      .tickSize(legendHeight)
+      .ticks(5);
+
+    const legend = svg
+      .append("g")
+      .attr("transform", `translate(0,${height + 40})`);
+
+    // Create gradient
+    const defs = svg.append("defs");
+    const gradient = defs
+      .append("linearGradient")
+      .attr("id", "correlation-gradient")
+      .attr("x1", "0%")
+      .attr("x2", "100%");
+
+    gradient
+      .selectAll("stop")
+      .data(d3.range(-1, 1.1, 0.1))
+      .enter()
+      .append("stop")
+      .attr("offset", (d) => ((d + 1) / 2) * 100 + "%")
+      .attr("stop-color", (d) => colorScale(d));
+
+    // Add gradient rect
+    legend
+      .append("rect")
+      .attr("width", legendWidth)
+      .attr("height", legendHeight)
+      .style("fill", "url(#correlation-gradient)");
+
+    // Add legend axis
+    legend.append("g").call(legendAxis).select(".domain").remove();
+  }, [matrixCorrelations]);
 
   return (
     <div className="p-4">
@@ -496,7 +674,6 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
             />
           </label>
         </div>
-
         {error && <div className="mt-2 text-red-500 text-sm">{error}</div>}
       </div>
 
@@ -529,21 +706,35 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                 </div>
               ))}
             </div>
+            <div className="mt-4">
+              <button
+                onClick={handleGenerateSynthetic}
+                disabled={isGenerating}
+                className={`w-full py-2 px-4 rounded font-medium ${
+                  isGenerating
+                    ? "bg-gray-300 cursor-not-allowed"
+                    : "bg-green-500 hover:bg-green-600 text-white"
+                }`}
+              >
+                {isGenerating ? "Generating..." : "Generate Synthetic Data"}
+              </button>
+            </div>
           </div>
 
           {/* Correlation Heatmap */}
-          <div className="border p-4 rounded">
-            <h3 className="text-lg font-bold mb-2">Correlation Heatmap</h3>
-            <svg ref={heatmapRef}></svg>
-          </div>
+          {syntheticColumns.length > 0 && (
+            <div className="border p-4 rounded">
+              <h3 className="text-lg font-bold mb-2">Correlation Heatmap</h3>
+              <svg ref={heatmapRef}></svg>
+            </div>
+          )}
 
           {/* Statistics */}
-          <div className="border p-4 rounded md:col-span-2">
-            <h3 className="text-lg font-bold mb-3">Column Statistics</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {uploadedColumns
-                .filter((col) => selectedColumns[col.name])
-                .map((col) => (
+          {syntheticColumns.length > 0 && (
+            <div className="border p-4 rounded md:col-span-2">
+              <h3 className="text-lg font-bold mb-3">Column Statistics</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {syntheticColumns.map((col) => (
                   <div key={col.name} className="p-3 bg-gray-50 rounded">
                     <h4 className="font-semibold">{col.name}</h4>
                     <div className="text-sm space-y-1 mt-2">
@@ -566,8 +757,9 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                     </div>
                   </div>
                 ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
