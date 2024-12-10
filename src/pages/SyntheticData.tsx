@@ -519,7 +519,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
     d3.select(heatmapRef.current).selectAll("*").remove();
 
-    const margin = { top: 50, right: 50, bottom: 50, left: 150 };
+    const margin = { top: 50, right: 120, bottom: 50, left: 150 };
     const size = Math.min(800, window.innerWidth - 100);
     const width = size - margin.left - margin.right;
     const height = size - margin.top - margin.bottom;
@@ -609,31 +609,30 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .style("font-size", "14px")
       .text("Correlation Matrix: Original vs Synthetic Data");
 
-    // Add color scale legend
-    const legendWidth = width;
-    const legendHeight = 10;
+    // Update legend positioning and orientation
+    const legendWidth = 20;
+    const legendHeight = height;
 
     const legendScale = d3
       .scaleLinear()
       .domain([-1, 1])
-      .range([0, legendWidth]);
+      .range([legendHeight, 0]);
 
-    const legendAxis = d3
-      .axisBottom(legendScale)
-      .tickSize(legendHeight)
-      .ticks(5);
+    const legendAxis = d3.axisRight(legendScale).tickSize(legendWidth).ticks(5);
 
     const legend = svg
       .append("g")
-      .attr("transform", `translate(0,${height + 40})`);
+      .attr("transform", `translate(${width + 40},0)`);
 
-    // Create gradient
+    // Create gradient for vertical legend
     const defs = svg.append("defs");
     const gradient = defs
       .append("linearGradient")
       .attr("id", "correlation-gradient")
       .attr("x1", "0%")
-      .attr("x2", "100%");
+      .attr("x2", "0%")
+      .attr("y1", "100%")
+      .attr("y2", "0%");
 
     gradient
       .selectAll("stop")
@@ -643,7 +642,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .attr("offset", (d) => ((d + 1) / 2) * 100 + "%")
       .attr("stop-color", (d) => colorScale(d));
 
-    // Add gradient rect
+    // Add vertical gradient rect
     legend
       .append("rect")
       .attr("width", legendWidth)
@@ -651,7 +650,22 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .style("fill", "url(#correlation-gradient)");
 
     // Add legend axis
-    legend.append("g").call(legendAxis).select(".domain").remove();
+    legend
+      .append("g")
+      .attr("transform", `translate(${legendWidth},0)`)
+      .call(legendAxis)
+      .select(".domain")
+      .remove();
+
+    // Add legend title
+    legend
+      .append("text")
+      .attr("transform", "rotate(90)")
+      .attr("x", legendHeight / 2)
+      .attr("y", -legendWidth - 45)
+      .attr("text-anchor", "middle")
+      .style("font-size", "12px")
+      .text("Correlation");
   }, [matrixCorrelations]);
 
   return (
