@@ -327,17 +327,19 @@ function parseColumns(csvText: string): ColumnData[] {
   return columns;
 }
 
-function generateSyntheticColumns(columns: ColumnData[]): ColumnData[] {
+function generateSyntheticColumns(
+  columns: ColumnData[],
+  targetSize: number
+): ColumnData[] {
   return columns.map((column) => {
     const syntheticValues = [];
-    const length = column.values.length;
 
     if (column.type === "numeric") {
       const values = column.values as number[];
       const mean = d3.mean(values) || 0;
       const std = d3.deviation(values) || 1;
 
-      for (let i = 0; i < length; i++) {
+      for (let i = 0; i < targetSize; i++) {
         syntheticValues.push(d3.randomNormal(mean, std)());
       }
     } else if (column.type === "date") {
@@ -345,7 +347,7 @@ function generateSyntheticColumns(columns: ColumnData[]): ColumnData[] {
       const minTime = Math.min(...dates.map((d) => d.getTime()));
       const maxTime = Math.max(...dates.map((d) => d.getTime()));
 
-      for (let i = 0; i < length; i++) {
+      for (let i = 0; i < targetSize; i++) {
         syntheticValues.push(
           new Date(minTime + Math.random() * (maxTime - minTime))
         );
@@ -353,10 +355,11 @@ function generateSyntheticColumns(columns: ColumnData[]): ColumnData[] {
     } else {
       const categories = Array.from(new Set(column.values));
       const distribution = categories.map(
-        (cat) => column.values.filter((v) => v === cat).length / length
+        (cat) =>
+          column.values.filter((v) => v === cat).length / column.values.length
       );
 
-      for (let i = 0; i < length; i++) {
+      for (let i = 0; i < targetSize; i++) {
         const rand = Math.random();
         let cumSum = 0;
         for (let j = 0; j < categories.length; j++) {
@@ -567,6 +570,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
   const [matrixCorrelations, setMatrixCorrelations] = useState<
     MatrixCorrelation[]
   >([]);
+  const [numRecords, setNumRecords] = useState<number>(1000);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const heatmapRef = useRef<SVGSVGElement>(null);
@@ -623,8 +627,8 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     setError(null);
 
     try {
-      // Generate synthetic data
-      const synthetic = generateSyntheticColumns(selectedCols);
+      // Generate synthetic data with specified number of records
+      const synthetic = generateSyntheticColumns(selectedCols, numRecords);
       setSyntheticColumns(synthetic);
 
       // Calculate correlations
@@ -866,6 +870,39 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                 </div>
               ))}
             </div>
+
+            {/* Add Record Count Slider */}
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Number of Synthetic Records: {numRecords}
+              </label>
+              <div className="flex items-center gap-4">
+                <input
+                  type="range"
+                  min="10"
+                  max="5000"
+                  step="10"
+                  value={numRecords}
+                  onChange={(e) => setNumRecords(parseInt(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="10"
+                  max="5000"
+                  step="10"
+                  value={numRecords}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value);
+                    if (value >= 10 && value <= 5000) {
+                      setNumRecords(value);
+                    }
+                  }}
+                  className="w-24 px-2 py-1 border rounded"
+                />
+              </div>
+            </div>
+
             <div className="mt-4">
               <button
                 onClick={handleGenerateSynthetic}
@@ -876,7 +913,9 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                     : "bg-green-500 hover:bg-green-600 text-white"
                 }`}
               >
-                {isGenerating ? "Generating..." : "Generate Synthetic Data"}
+                {isGenerating
+                  ? "Generating..."
+                  : `Generate ${numRecords} Records`}
               </button>
             </div>
           </div>
