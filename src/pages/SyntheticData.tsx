@@ -1,8 +1,8 @@
 import { useRef, useEffect, useState } from "react";
 import * as d3 from "d3";
 import { DataPoint } from "../types";
-import { generateSyntheticData as generateCartSyntheticData } from "../utils/cart";
 import { ArrowPathIcon } from "@heroicons/react/24/solid";
+import Worker from "../workers/syntheticWorker?worker";
 
 interface SyntheticDataProps {
   data: DataPoint[];
@@ -36,10 +36,13 @@ interface TableState {
   sortDirection: "asc" | "desc";
 }
 
-const worker = new Worker(
-  new URL("../workers/syntheticWorker.ts", import.meta.url),
-  { type: "module" }
-);
+const worker = new Worker();
+
+console.log("Worker initialized:", worker);
+
+worker.onerror = (error) => {
+  console.error("Worker error:", error);
+};
 
 function parseColumns(csvText: string): ColumnData[] {
   const lines = csvText.split("\n");
@@ -339,7 +342,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
   // Add worker cleanup
   useEffect(() => {
     return () => {
-      worker.terminate();
+      //worker.terminate();
     };
   }, []);
 
@@ -396,7 +399,9 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     setError(null);
 
     try {
-      // Create DataPoints for each column
+      // Add debug logging
+      console.log("Starting synthetic data generation");
+
       const columnDataPoints: { [key: string]: DataPoint[] } = {};
 
       for (const col of selectedCols) {
@@ -426,10 +431,11 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
         );
       }
 
-      // Set up worker message handling
+      // Set up worker message handling with debug
       const workerPromise = new Promise<{ [key: string]: DataPoint[] }>(
         (resolve, reject) => {
           const messageHandler = (e: MessageEvent) => {
+            console.log("Worker message received:", e.data);
             if (e.data.type === "progress") {
               setProgress(e.data.progress);
             } else if (e.data.type === "complete") {
@@ -442,8 +448,21 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
           };
 
           worker.addEventListener("message", messageHandler);
+
+          // Add error handler
+          worker.addEventListener("error", (error) => {
+            console.error("Worker error:", error);
+            reject(error);
+          });
         }
       );
+
+      // Log the message being sent to worker
+      console.log("Sending message to worker:", {
+        type: "generate",
+        columnDataPoints,
+        numRecords,
+      });
 
       // Start the worker
       worker.postMessage({
@@ -454,6 +473,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
       // Wait for worker to complete
       const syntheticDataPoints = await workerPromise;
+      console.log("Worker completed:", syntheticDataPoints);
 
       // Convert back to ColumnData format
       const synthetic: ColumnData[] = selectedCols.map((col) => ({
