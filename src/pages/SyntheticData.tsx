@@ -416,6 +416,147 @@ interface MatrixCorrelation {
   correlation: number;
 }
 
+interface TableState {
+  page: number;
+  pageSize: number;
+  sortColumn: string | null;
+  sortDirection: "asc" | "desc";
+}
+
+function SyntheticDataTable({ data }: { data: ColumnData[] }) {
+  const [tableState, setTableState] = useState<TableState>({
+    page: 1,
+    pageSize: 10,
+    sortColumn: null,
+    sortDirection: "asc",
+  });
+
+  // Calculate total rows based on the length of any column's values
+  const totalRows = data[0]?.values.length || 0;
+  const totalPages = Math.ceil(totalRows / tableState.pageSize);
+
+  // Get the current page's data
+  const getCurrentPageData = () => {
+    const start = (tableState.page - 1) * tableState.pageSize;
+    const end = start + tableState.pageSize;
+
+    // Create array of row indices
+    const rowIndices = Array.from({ length: totalRows }, (_, i) => i);
+
+    // Sort if needed
+    if (tableState.sortColumn) {
+      const columnIndex = data.findIndex(
+        (col) => col.name === tableState.sortColumn
+      );
+      if (columnIndex !== -1) {
+        rowIndices.sort((a, b) => {
+          const aVal = data[columnIndex].values[a];
+          const bVal = data[columnIndex].values[b];
+          const comparison = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+          return tableState.sortDirection === "asc" ? comparison : -comparison;
+        });
+      }
+    }
+
+    // Get the slice for current page
+    return rowIndices.slice(start, end);
+  };
+
+  const handleSort = (columnName: string) => {
+    setTableState((prev) => ({
+      ...prev,
+      sortColumn: columnName,
+      sortDirection:
+        prev.sortColumn === columnName && prev.sortDirection === "asc"
+          ? "desc"
+          : "asc",
+    }));
+  };
+
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              {data.map((column) => (
+                <th
+                  key={column.name}
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort(column.name)}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>{column.name}</span>
+                    {tableState.sortColumn === column.name && (
+                      <span>
+                        {tableState.sortDirection === "asc" ? "↑" : "↓"}
+                      </span>
+                    )}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {getCurrentPageData().map((rowIndex) => (
+              <tr key={rowIndex} className="hover:bg-gray-50">
+                {data.map((column) => (
+                  <td key={column.name} className="px-6 py-4 whitespace-nowrap">
+                    {column.type === "date"
+                      ? (column.values[rowIndex] as Date).toLocaleDateString()
+                      : column.type === "numeric"
+                      ? (column.values[rowIndex] as number).toFixed(2)
+                      : String(column.values[rowIndex])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="bg-white px-4 py-3 flex items-center justify-between border-t">
+        <div className="flex-1 flex justify-between items-center">
+          <div className="text-sm text-gray-700">
+            Showing {(tableState.page - 1) * tableState.pageSize + 1} to{" "}
+            {Math.min(tableState.page * tableState.pageSize, totalRows)} of{" "}
+            {totalRows} results
+          </div>
+          <div className="flex space-x-2">
+            <button
+              onClick={() =>
+                setTableState((prev) => ({ ...prev, page: prev.page - 1 }))
+              }
+              disabled={tableState.page === 1}
+              className={`px-3 py-1 rounded ${
+                tableState.page === 1
+                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-white text-gray-700 hover:bg-gray-50 border"
+              }`}
+            >
+              Previous
+            </button>
+            <button
+              onClick={() =>
+                setTableState((prev) => ({ ...prev, page: prev.page + 1 }))
+              }
+              disabled={tableState.page === totalPages}
+              className={`px-3 py-1 rounded ${
+                tableState.page === totalPages
+                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-white text-gray-700 hover:bg-gray-50 border"
+              }`}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
   const [uploadedColumns, setUploadedColumns] = useState<ColumnData[]>([]);
   const [syntheticColumns, setSyntheticColumns] = useState<ColumnData[]>([]);
@@ -779,6 +920,14 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Add the table after the statistics section */}
+          {syntheticColumns.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-lg font-bold mb-3">Synthetic Data Preview</h3>
+              <SyntheticDataTable data={syntheticColumns} />
             </div>
           )}
         </div>
