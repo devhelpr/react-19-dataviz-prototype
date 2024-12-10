@@ -311,12 +311,12 @@ function parseColumns(csvText: string): ColumnData[] {
   // Detect column types and convert values
   columns.forEach((column) => {
     const sampleValues = column.values.slice(0, 100);
-    column.type = detectColumnType(sampleValues);
+    column.type = detectColumnType(sampleValues as string[]);
 
     // Convert values based on type
     column.values = column.values.map((value) => {
       if (column.type === "numeric") {
-        return parseFloat(value) || 0;
+        return parseFloat(value as unknown as string) || 0;
       } else if (column.type === "date") {
         return new Date(value);
       }
@@ -395,12 +395,12 @@ function calculateColumnCorrelation(
       new Set([...original.values, ...synthetic.values])
     );
     const origDist = calculateCategoryDistribution(
-      original.values as string[],
-      categories
+      original.values as unknown as DataPoint[],
+      categories as string[]
     );
     const synthDist = calculateCategoryDistribution(
-      synthetic.values as string[],
-      categories
+      synthetic.values as unknown as DataPoint[],
+      categories as string[]
     );
     return calculatePearsonCorrelation(origDist, synthDist);
   }
