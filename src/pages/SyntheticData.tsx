@@ -226,32 +226,64 @@ function calculateColumnCorrelation(
   if (original.type !== synthetic.type) return 0;
 
   switch (original.type) {
-    case "numeric":
+    case "numeric": {
+      // Direct correlation for numeric values
       return calculatePearsonCorrelation(
         original.values as number[],
         synthetic.values as number[]
       );
-    case "date":
-      return calculatePearsonCorrelation(
-        (original.values as Date[]).map((d) => d.getTime()),
-        (synthetic.values as Date[]).map((d) => d.getTime())
+    }
+    case "date": {
+      // Convert dates to timestamps for correlation
+      const origTimestamps = (original.values as Date[]).map((d) =>
+        d.getTime()
       );
-    case "categorical":
+      const synthTimestamps = (synthetic.values as Date[]).map((d) =>
+        d.getTime()
+      );
+      // Normalize timestamps to prevent numerical overflow
+      const minTime = Math.min(...origTimestamps, ...synthTimestamps);
+      const normalizedOrig = origTimestamps.map(
+        (t) => (t - minTime) / (1000 * 60 * 60 * 24)
+      ); // Convert to days
+      const normalizedSynth = synthTimestamps.map(
+        (t) => (t - minTime) / (1000 * 60 * 60 * 24)
+      );
+      return calculatePearsonCorrelation(normalizedOrig, normalizedSynth);
+    }
+    case "categorical": {
       // Calculate category distribution similarity
-      const categories = Array.from(
-        new Set([...original.values, ...synthetic.values])
+      const allCategories = Array.from(
+        new Set([...original.values, ...synthetic.values] as string[])
       );
-      const origDist = categories.map(
-        (cat) =>
-          (original.values as string[]).filter((v) => v === cat).length /
-          original.values.length
+
+      // Calculate frequency distributions
+      const origFreq = new Map<string, number>();
+      const synthFreq = new Map<string, number>();
+
+      allCategories.forEach((cat) => {
+        origFreq.set(cat, 0);
+        synthFreq.set(cat, 0);
+      });
+
+      (original.values as string[]).forEach((val) => {
+        origFreq.set(val, (origFreq.get(val) || 0) + 1);
+      });
+
+      (synthetic.values as string[]).forEach((val) => {
+        synthFreq.set(val, (synthFreq.get(val) || 0) + 1);
+      });
+
+      // Convert to arrays and normalize
+      const origDist = Array.from(origFreq.values()).map(
+        (v) => v / original.values.length
       );
-      const synthDist = categories.map(
-        (cat) =>
-          (synthetic.values as string[]).filter((v) => v === cat).length /
-          synthetic.values.length
+      const synthDist = Array.from(synthFreq.values()).map(
+        (v) => v / synthetic.values.length
       );
+
       return calculatePearsonCorrelation(origDist, synthDist);
+    }
     default:
       return 0;
   }
@@ -264,15 +296,22 @@ function calculatePearsonCorrelation(x: number[], y: number[]): number {
   const meanX = x.reduce((a, b) => a + b, 0) / n;
   const meanY = y.reduce((a, b) => a + b, 0) / n;
 
-  const covXY = x.reduce(
-    (sum, xi, i) => sum + (xi - meanX) * (y[i] - meanY),
-    0
-  );
-  const varX = x.reduce((sum, xi) => sum + Math.pow(xi - meanX, 2), 0);
-  const varY = y.reduce((sum, yi) => sum + Math.pow(yi - meanY, 2), 0);
+  let numerator = 0;
+  let denominatorX = 0;
+  let denominatorY = 0;
 
-  const correlation = covXY / Math.sqrt(varX * varY);
-  return isNaN(correlation) ? 0 : correlation;
+  for (let i = 0; i < n; i++) {
+    const diffX = x[i] - meanX;
+    const diffY = y[i] - meanY;
+    numerator += diffX * diffY;
+    denominatorX += diffX * diffX;
+    denominatorY += diffY * diffY;
+  }
+
+  if (denominatorX === 0 || denominatorY === 0) return 0;
+
+  const correlation = numerator / Math.sqrt(denominatorX * denominatorY);
+  return Math.max(-1, Math.min(1, correlation)); // Ensure result is between -1 and 1
 }
 
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
