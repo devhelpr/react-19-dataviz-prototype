@@ -169,10 +169,10 @@ function buildDecisionTree(
 
   if (targetFeature === "category") {
     leftData = data.filter(
-      (d) => (d.category <= bestSplit.threshold) as string
+      (d) => d.category <= (bestSplit.threshold as string)
     );
     rightData = data.filter(
-      (d) => (d.category > bestSplit.threshold) as string
+      (d) => d.category > (bestSplit.threshold as string)
     );
   } else {
     const threshold = bestSplit.threshold as number;
