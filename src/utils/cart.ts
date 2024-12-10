@@ -168,12 +168,9 @@ function buildDecisionTree(
   let rightData: DataPoint[];
 
   if (targetFeature === "category") {
-    leftData = data.filter(
-      (d) => d.category <= (bestSplit.threshold as string)
-    );
-    rightData = data.filter(
-      (d) => d.category > (bestSplit.threshold as string)
-    );
+    const threshold = bestSplit.threshold as string;
+    leftData = data.filter((d) => d.category.localeCompare(threshold) <= 0);
+    rightData = data.filter((d) => d.category.localeCompare(threshold) > 0);
   } else {
     const threshold = bestSplit.threshold as number;
     if (targetFeature === "date") {
