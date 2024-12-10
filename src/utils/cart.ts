@@ -213,11 +213,25 @@ function createLeafNode(data: DataPoint[]): TreeNode {
   const dates = data.map((d) => d.date);
   const values = data.map((d) => d.value);
 
+  // Find most common category without using d3.mode
+  const categoryCounts = categories.reduce((acc, cat) => {
+    acc.set(cat, data.filter((d) => d.category === cat).length);
+    return acc;
+  }, new Map<string, number>());
+
+  let mostCommonCategory = categories[0];
+  let maxCount = 0;
+
+  for (const [category, count] of categoryCounts) {
+    if (count > maxCount) {
+      maxCount = count;
+      mostCommonCategory = category;
+    }
+  }
+
   return {
     value: {
-      category: d3
-        .mode(data, (d) => parseFloat(d.category || categories[0]) ?? "")
-        .toString(),
+      category: mostCommonCategory,
       meanValue: d3.mean(values) || 0,
       stdValue: d3.deviation(values) || 1,
       dateRange: [d3.min(dates) || new Date(), d3.max(dates) || new Date()],
