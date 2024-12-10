@@ -163,10 +163,10 @@ function buildDecisionTree(
 
   if (bestSplit.feature === "category") {
     leftData = data.filter(
-      (d) => (d.category <= bestSplit.threshold) as string
+      (d) => (d.category <= bestSplit.threshold) as unknown as string
     );
     rightData = data.filter(
-      (d) => (d.category > bestSplit.threshold) as string
+      (d) => (d.category > bestSplit.threshold) as unknown as string
     );
   } else {
     const threshold = bestSplit.threshold as number;
@@ -215,7 +215,11 @@ function createLeafNode(data: DataPoint[]): TreeNode {
 
   return {
     value: {
-      category: d3.mode(data, (d) => d.category) || categories[0],
+      category: (
+        (d3.mode(data, (d) => (d.category ?? "").toString()) ||
+          categories[0]) ??
+        ""
+      ).toString(),
       meanValue: d3.mean(values) || 0,
       stdValue: d3.deviation(values) || 1,
       dateRange: [d3.min(dates) || new Date(), d3.max(dates) || new Date()],

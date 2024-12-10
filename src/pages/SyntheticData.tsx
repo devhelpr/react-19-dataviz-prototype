@@ -697,6 +697,10 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
   useEffect(() => {
     if (!heatmapRef.current || matrixCorrelations.length === 0) return;
 
+    // Clear the entire SVG content first
+    const svg = d3.select(heatmapRef.current);
+    svg.selectAll("*").remove();
+
     // Get container width
     const containerWidth = heatmapRef.current.parentElement?.clientWidth || 800;
 
@@ -704,10 +708,10 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     const margin = { top: 50, right: 100, bottom: 80, left: 150 };
     const width = containerWidth - margin.left - margin.right;
     const cellSize = Math.min(40, (width / matrixCorrelations.length) * 2);
-    const height = cellSize * (matrixCorrelations.length / 2); // Divide by 2 since we have original/synthetic pairs
+    const height = cellSize * (matrixCorrelations.length / 2);
 
-    const svg = d3
-      .select(heatmapRef.current)
+    // Create new SVG group
+    const g = svg
       .attr("width", width + margin.left + margin.right)
       .attr("height", height + margin.top + margin.bottom)
       .append("g")
@@ -741,8 +745,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .padding(0.05);
 
     // Add cells
-    svg
-      .selectAll("rect")
+    g.selectAll("rect")
       .data(matrixCorrelations)
       .enter()
       .append("rect")
@@ -755,8 +758,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .attr("stroke-width", 1);
 
     // Add correlation values
-    svg
-      .selectAll(".correlation-text")
+    g.selectAll(".correlation-text")
       .data(matrixCorrelations)
       .enter()
       .append("text")
@@ -770,8 +772,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .text((d) => d.correlation.toFixed(2));
 
     // Update x-axis text
-    svg
-      .append("g")
+    g.append("g")
       .style("font-size", "10px")
       .attr("transform", `translate(0,${height})`)
       .call(d3.axisBottom(xScale))
@@ -782,11 +783,10 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .style("text-anchor", "end");
 
     // Add y axis
-    svg.append("g").style("font-size", "10px").call(d3.axisLeft(yScale));
+    g.append("g").style("font-size", "10px").call(d3.axisLeft(yScale));
 
     // Add title
-    svg
-      .append("text")
+    g.append("text")
       .attr("x", width / 2)
       .attr("y", -20)
       .attr("text-anchor", "middle")
@@ -805,12 +805,12 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     const legendAxis = d3.axisRight(legendScale).tickSize(legendWidth).ticks(5);
 
     // Update legend position
-    const legend = svg
+    const legend = g
       .append("g")
       .attr("transform", `translate(${width + 20},0)`);
 
     // Create gradient for vertical legend
-    const defs = svg.append("defs");
+    const defs = g.append("defs");
     const gradient = defs
       .append("linearGradient")
       .attr("id", "correlation-gradient")
