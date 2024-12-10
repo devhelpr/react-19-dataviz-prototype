@@ -215,11 +215,9 @@ function createLeafNode(data: DataPoint[]): TreeNode {
 
   return {
     value: {
-      category: (
-        (d3.mode(data, (d) => (d.category ?? "").toString()) ||
-          categories[0]) ??
-        ""
-      ).toString(),
+      category: d3
+        .mode(data, (d) => parseFloat(d.category || categories[0]) ?? "")
+        .toString(),
       meanValue: d3.mean(values) || 0,
       stdValue: d3.deviation(values) || 1,
       dateRange: [d3.min(dates) || new Date(), d3.max(dates) || new Date()],
