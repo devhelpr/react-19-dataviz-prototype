@@ -154,7 +154,7 @@ function AppContent() {
 
 function App() {
   return (
-    <Router basename="/">
+    <Router>
       <AppContent />
     </Router>
   );
