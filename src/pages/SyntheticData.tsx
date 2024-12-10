@@ -36,6 +36,11 @@ interface TableState {
   sortDirection: "asc" | "desc";
 }
 
+const worker = new Worker(
+  new URL("../workers/syntheticWorker.ts", import.meta.url),
+  { type: "module" }
+);
+
 function parseColumns(csvText: string): ColumnData[] {
   const lines = csvText.split("\n");
   const headers = lines[0].split(",").map((h) => h.trim());
@@ -331,6 +336,13 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const heatmapRef = useRef<SVGSVGElement>(null);
 
+  // Add worker cleanup
+  useEffect(() => {
+    return () => {
+      worker.terminate();
+    };
+  }, []);
+
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -384,46 +396,64 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     setError(null);
 
     try {
-      // Convert each selected column into its own set of DataPoints
-      const selectedCols = uploadedColumns.filter(
-        (col) => selectedColumns[col.name]
-      );
-      const syntheticDataPoints: { [key: string]: DataPoint[] } = {};
+      // Create DataPoints for each column
+      const columnDataPoints: { [key: string]: DataPoint[] } = {};
 
-      // Generate synthetic data for each column independently
       for (const col of selectedCols) {
-        // Create DataPoints specific to this column
-        const columnDataPoints = Array.from(
+        columnDataPoints[col.name] = Array.from(
           { length: col.values.length },
           (_, i) => {
             if (col.type === "date") {
               return {
                 date: col.values[i] as Date,
-                value: i, // Use index as value
-                category: "A", // Default category
+                value: i,
+                category: "A",
               };
             } else if (col.type === "numeric") {
               return {
-                date: new Date(Date.now() + i * 86400000), // Sequential dates
+                date: new Date(Date.now() + i * 86400000),
                 value: col.values[i] as number,
-                category: "A", // Default category
+                category: "A",
               };
             } else {
               return {
-                date: new Date(Date.now() + i * 86400000), // Sequential dates
-                value: i, // Use index as value
+                date: new Date(Date.now() + i * 86400000),
+                value: i,
                 category: col.values[i] as string,
               };
             }
           }
         );
-
-        // Generate synthetic data for this column
-        syntheticDataPoints[col.name] = generateCartSyntheticData(
-          columnDataPoints,
-          numRecords
-        );
       }
+
+      // Set up worker message handling
+      const workerPromise = new Promise<{ [key: string]: DataPoint[] }>(
+        (resolve, reject) => {
+          const messageHandler = (e: MessageEvent) => {
+            if (e.data.type === "progress") {
+              setProgress(e.data.progress);
+            } else if (e.data.type === "complete") {
+              worker.removeEventListener("message", messageHandler);
+              resolve(e.data.data);
+            } else if (e.data.type === "error") {
+              worker.removeEventListener("message", messageHandler);
+              reject(new Error(e.data.error));
+            }
+          };
+
+          worker.addEventListener("message", messageHandler);
+        }
+      );
+
+      // Start the worker
+      worker.postMessage({
+        type: "generate",
+        columnDataPoints,
+        numRecords,
+      });
+
+      // Wait for worker to complete
+      const syntheticDataPoints = await workerPromise;
 
       // Convert back to ColumnData format
       const synthetic: ColumnData[] = selectedCols.map((col) => ({

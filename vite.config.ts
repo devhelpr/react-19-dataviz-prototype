@@ -8,4 +8,7 @@ export default defineConfig({
   server: {
     historyApiFallback: true,
   },
+  worker: {
+    format: "es",
+  },
 });
