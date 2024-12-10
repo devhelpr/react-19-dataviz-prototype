@@ -517,12 +517,14 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
   useEffect(() => {
     if (!heatmapRef.current || matrixCorrelations.length === 0) return;
 
-    d3.select(heatmapRef.current).selectAll("*").remove();
+    // Get container width
+    const containerWidth = heatmapRef.current.parentElement?.clientWidth || 800;
 
-    const margin = { top: 50, right: 120, bottom: 50, left: 150 };
-    const size = Math.min(800, window.innerWidth - 100);
-    const width = size - margin.left - margin.right;
-    const height = size - margin.top - margin.bottom;
+    // Calculate responsive dimensions
+    const margin = { top: 50, right: 100, bottom: 80, left: 150 };
+    const width = containerWidth - margin.left - margin.right;
+    const cellSize = Math.min(40, (width / matrixCorrelations.length) * 2);
+    const height = cellSize * (matrixCorrelations.length / 2); // Divide by 2 since we have original/synthetic pairs
 
     const svg = d3
       .select(heatmapRef.current)
@@ -587,7 +589,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .style("font-size", "10px")
       .text((d) => d.correlation.toFixed(2));
 
-    // Add x axis
+    // Update x-axis text
     svg
       .append("g")
       .style("font-size", "10px")
@@ -595,6 +597,8 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .call(d3.axisBottom(xScale))
       .selectAll("text")
       .attr("transform", "rotate(-45)")
+      .attr("y", 10)
+      .attr("x", -5)
       .style("text-anchor", "end");
 
     // Add y axis
@@ -609,7 +613,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .style("font-size", "14px")
       .text("Correlation Matrix: Original vs Synthetic Data");
 
-    // Update legend positioning and orientation
+    // Update legend dimensions
     const legendWidth = 20;
     const legendHeight = height;
 
@@ -620,9 +624,10 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
     const legendAxis = d3.axisRight(legendScale).tickSize(legendWidth).ticks(5);
 
+    // Update legend position
     const legend = svg
       .append("g")
-      .attr("transform", `translate(${width + 40},0)`);
+      .attr("transform", `translate(${width + 20},0)`);
 
     // Create gradient for vertical legend
     const defs = svg.append("defs");
@@ -737,9 +742,11 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
           {/* Correlation Heatmap */}
           {syntheticColumns.length > 0 && (
-            <div className="border p-4 rounded">
+            <div className="border p-4 rounded overflow-x-auto">
               <h3 className="text-lg font-bold mb-2">Correlation Heatmap</h3>
-              <svg ref={heatmapRef}></svg>
+              <div className="min-w-[500px]">
+                <svg ref={heatmapRef}></svg>
+              </div>
             </div>
           )}
 
