@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import * as d3 from "d3";
 import { DataPoint } from "../types";
 import { generateSyntheticData as generateCartSyntheticData } from "../utils/cart";
-import { FaSpinner } from "react-icons/fa";
+import { ArrowPathIcon } from "@heroicons/react/24/solid";
 
 interface SyntheticDataProps {
   data: DataPoint[];
@@ -384,66 +384,57 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     setError(null);
 
     try {
-      // Convert selected columns to DataPoint format for CART
-      const dateColumn = selectedCols.find((col) => col.type === "date");
-      const numericColumn = selectedCols.find((col) => col.type === "numeric");
-      const categoricalColumn = selectedCols.find(
-        (col) => col.type === "categorical"
+      // Convert each selected column into its own set of DataPoints
+      const selectedCols = uploadedColumns.filter(
+        (col) => selectedColumns[col.name]
       );
+      const syntheticDataPoints: { [key: string]: DataPoint[] } = {};
 
-      const dataPoints: DataPoint[] = Array.from(
-        { length: selectedCols[0].values.length },
-        (_, i) => {
-          // Generate reasonable defaults for missing types
-          const date = dateColumn
-            ? (dateColumn.values[i] as Date)
-            : new Date(Date.now() + i * 24 * 60 * 60 * 1000); // Sequential dates
+      // Generate synthetic data for each column independently
+      for (const col of selectedCols) {
+        // Create DataPoints specific to this column
+        const columnDataPoints = Array.from(
+          { length: col.values.length },
+          (_, i) => {
+            if (col.type === "date") {
+              return {
+                date: col.values[i] as Date,
+                value: i, // Use index as value
+                category: "A", // Default category
+              };
+            } else if (col.type === "numeric") {
+              return {
+                date: new Date(Date.now() + i * 86400000), // Sequential dates
+                value: col.values[i] as number,
+                category: "A", // Default category
+              };
+            } else {
+              return {
+                date: new Date(Date.now() + i * 86400000), // Sequential dates
+                value: i, // Use index as value
+                category: col.values[i] as string,
+              };
+            }
+          }
+        );
 
-          const value = numericColumn
-            ? (numericColumn.values[i] as number)
-            : Math.random() * 100; // Random value between 0 and 100
-
-          const category = categoricalColumn
-            ? (categoricalColumn.values[i] as string)
-            : String.fromCharCode(65 + (i % 26)); // Cycle through A-Z
-
-          return { date, value, category };
-        }
-      );
-
-      // Generate synthetic data with progress updates
-      const batchSize = 1000;
-      const syntheticDataPoints: DataPoint[] = [];
-
-      for (let i = 0; i < numRecords; i += batchSize) {
-        const batchCount = Math.min(batchSize, numRecords - i);
-        const batch = generateCartSyntheticData(dataPoints, batchCount);
-        syntheticDataPoints.push(...batch);
-
-        // Update progress
-        setProgress(Math.round(((i + batchCount) / numRecords) * 100));
-
-        // Allow UI to update
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        // Generate synthetic data for this column
+        syntheticDataPoints[col.name] = generateCartSyntheticData(
+          columnDataPoints,
+          numRecords
+        );
       }
 
       // Convert back to ColumnData format
-      const synthetic: ColumnData[] = selectedCols.map((col) => {
-        let values: (number | Date | string)[];
-        if (col.type === "date") {
-          values = syntheticDataPoints.map((d) => d.date);
-        } else if (col.type === "numeric") {
-          values = syntheticDataPoints.map((d) => d.value);
-        } else {
-          values = syntheticDataPoints.map((d) => d.category);
-        }
-
-        return {
-          name: col.name,
-          type: col.type,
-          values,
-        };
-      });
+      const synthetic: ColumnData[] = selectedCols.map((col) => ({
+        name: col.name,
+        type: col.type,
+        values: syntheticDataPoints[col.name].map((dp) => {
+          if (col.type === "date") return dp.date;
+          if (col.type === "numeric") return dp.value;
+          return dp.category;
+        }),
+      }));
 
       setSyntheticColumns(synthetic);
 
@@ -725,14 +716,14 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                 <button
                   onClick={handleGenerateSynthetic}
                   disabled={isGenerating}
-                  className={`w-full py-2 px-4 rounded font-medium flex items-center justify-center space-x-2 ${
+                  className={`w-full py-2 px-4 rounded font-medium flex items-center justify-center gap-2 ${
                     isGenerating
                       ? "bg-gray-300 cursor-not-allowed"
                       : "bg-green-500 hover:bg-green-600 text-white"
                   }`}
                 >
                   {isGenerating && (
-                    <FaSpinner className="animate-spin h-5 w-5" />
+                    <ArrowPathIcon className="h-5 w-5 animate-spin" />
                   )}
                   <span>
                     {isGenerating
