@@ -2,6 +2,7 @@ import { useMemo, useRef, useEffect, useState } from "react";
 import * as d3 from "d3";
 import { DataPoint } from "../types";
 import { parseCSV } from "../utils/csvParser";
+import { generateSyntheticData as generateCartSyntheticData } from "../utils/cart";
 
 interface SyntheticDataProps {
   data: DataPoint[];
@@ -119,68 +120,42 @@ function generateSyntheticDataFromTree(
   targetSize: number
 ): DataPoint[] {
   const syntheticData: DataPoint[] = [];
+  const batchSize = 1000; // Process in smaller batches
 
-  function traverse(node: TreeNode, remainingPoints: number): number {
-    if (node.value) {
-      // Leaf node: generate synthetic points
-      const pointsToGenerate = Math.min(
-        remainingPoints,
-        Math.ceil(targetSize / 4)
-      );
-
-      for (let i = 0; i < pointsToGenerate; i++) {
-        // Generate value using normal distribution
-        const value = Math.max(
-          0,
-          d3.randomNormal(node.value.meanValue, node.value.stdValue)()
-        );
-
-        // Generate date within the node's date range
-        const startTime = node.value.dateRange[0].getTime();
-        const timeRange = node.value.dateRange[1].getTime() - startTime;
-        const date = new Date(startTime + Math.random() * timeRange);
-
-        syntheticData.push({
-          category: node.value.category,
-          value,
-          date,
-        });
-      }
-      return pointsToGenerate;
+  function generateDataPoint(node: TreeNode): DataPoint {
+    if (!node.value) {
+      // If not a leaf node, randomly choose left or right branch
+      const nextNode = Math.random() < 0.5 ? node.left : node.right;
+      return generateDataPoint(nextNode!);
     }
 
-    if (!node.left || !node.right) return 0;
+    // Generate synthetic point from leaf node statistics
+    const value = Math.max(
+      0,
+      d3.randomNormal(node.value.meanValue, node.value.stdValue)()
+    );
 
-    // Non-leaf node: recursively generate data
-    const leftPoints = traverse(node.left, Math.floor(remainingPoints / 2));
-    const rightPoints = traverse(node.right, remainingPoints - leftPoints);
+    const startTime = node.value.dateRange[0].getTime();
+    const timeRange = node.value.dateRange[1].getTime() - startTime;
+    const date = new Date(startTime + Math.random() * timeRange);
 
-    return leftPoints + rightPoints;
+    return {
+      category: node.value.category,
+      value,
+      date,
+    };
   }
 
+  // Generate data in batches
   while (syntheticData.length < targetSize) {
-    const remaining = targetSize - syntheticData.length;
-    traverse(tree, remaining);
+    const remaining = Math.min(batchSize, targetSize - syntheticData.length);
+    const batch = Array.from({ length: remaining }, () =>
+      generateDataPoint(tree)
+    );
+    syntheticData.push(...batch);
   }
 
   return syntheticData;
-}
-
-function generateSyntheticData(realData: DataPoint[]): DataPoint[] {
-  // Build decision tree from real data
-  const tree = buildDecisionTree(realData);
-
-  // Generate synthetic data using the tree
-  const syntheticData = generateSyntheticDataFromTree(tree, realData.length);
-
-  // Sort by date to maintain temporal order
-  return syntheticData.sort((a, b) => a.date.getTime() - b.date.getTime());
-}
-
-interface ColumnCorrelation {
-  column: "date" | "value" | "category";
-  label: string;
-  correlation: number;
 }
 
 function calculateCorrelations(
@@ -255,6 +230,12 @@ function calculateCategoryDistribution(
   return categories.map(
     (cat) => data.filter((d) => d.category === cat).length / total
   );
+}
+
+interface ColumnCorrelation {
+  column: "date" | "value" | "category";
+  label: string;
+  correlation: number;
 }
 
 interface ColumnSelection {
@@ -571,6 +552,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     MatrixCorrelation[]
   >([]);
   const [numRecords, setNumRecords] = useState<number>(1000);
+  const [progress, setProgress] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const heatmapRef = useRef<SVGSVGElement>(null);
@@ -609,7 +591,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     }));
   };
 
-  const handleGenerateSynthetic = () => {
+  const handleGenerateSynthetic = async () => {
     if (uploadedColumns.length === 0) {
       setError("Please upload a CSV file first");
       return;
@@ -624,11 +606,63 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
     }
 
     setIsGenerating(true);
+    setProgress(0);
     setError(null);
 
     try {
-      // Generate synthetic data with specified number of records
-      const synthetic = generateSyntheticColumns(selectedCols, numRecords);
+      // Convert selected columns to DataPoint format for CART
+      const dataPoints: DataPoint[] = Array.from(
+        { length: selectedCols[0].values.length },
+        (_, i) => ({
+          date:
+            (selectedCols.find((col) => col.type === "date")?.values[
+              i
+            ] as Date) || new Date(),
+          value:
+            (selectedCols.find((col) => col.type === "numeric")?.values[
+              i
+            ] as number) || 0,
+          category:
+            (selectedCols.find((col) => col.type === "categorical")?.values[
+              i
+            ] as string) || "A",
+        })
+      );
+
+      // Generate synthetic data with progress updates
+      const batchSize = 1000;
+      const syntheticDataPoints: DataPoint[] = [];
+
+      for (let i = 0; i < numRecords; i += batchSize) {
+        const batchCount = Math.min(batchSize, numRecords - i);
+        const batch = generateCartSyntheticData(dataPoints, batchCount);
+        syntheticDataPoints.push(...batch);
+
+        // Update progress
+        setProgress(Math.round(((i + batchCount) / numRecords) * 100));
+
+        // Allow UI to update
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      // Convert back to ColumnData format
+      const synthetic: ColumnData[] = selectedCols.map((col) => {
+        let values: (number | Date | string)[];
+        if (col.type === "date") {
+          values = syntheticDataPoints.map((d) => d.date);
+        } else if (col.type === "numeric") {
+          values = syntheticDataPoints.map((d) => d.value);
+        } else {
+          values = syntheticDataPoints.map((d) => d.category);
+        }
+
+        return {
+          name: col.name,
+          type: col.type,
+          values,
+        };
+      });
+
       setSyntheticColumns(synthetic);
 
       // Calculate correlations
@@ -656,6 +690,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       );
     } finally {
       setIsGenerating(false);
+      setProgress(0);
     }
   };
 
@@ -914,7 +949,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
                 }`}
               >
                 {isGenerating
-                  ? "Generating..."
+                  ? `Generating... ${progress}%`
                   : `Generate ${numRecords} Records`}
               </button>
             </div>
