@@ -639,9 +639,12 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .style("fill", (d) => {
         const color = d3.color(colorScale(d.correlation));
         if (!color) return "black";
-        // Calculate perceived brightness (using relative luminance formula)
-        const luminance =
-          (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) / 255;
+
+        // Get RGB values using d3.rgb()
+        const rgb = d3.rgb(color);
+
+        // Calculate perceived brightness
+        const luminance = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
         return luminance < 0.5 ? "white" : "black";
       })
       .style("font-size", "10px")
