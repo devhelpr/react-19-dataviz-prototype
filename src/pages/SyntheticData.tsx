@@ -71,9 +71,24 @@ function parseColumns(csvText: string): ColumnData[] {
     const numericCount = sampleValues.filter(
       (v) => !isNaN(parseFloat(v as string))
     ).length;
+
     if (numericCount / sampleValues.length > 0.8) {
-      column.type = "numeric";
-      column.values = column.values.map((v) => parseFloat(v as string) || 0);
+      // Check number of unique values
+      const uniqueValues = new Set(
+        column.values.map((v) => parseFloat(v as string))
+      );
+
+      if (uniqueValues.size <= 10) {
+        // Treat as categorical if 10 or fewer unique values
+        column.type = "categorical";
+        column.values = column.values.map((v) =>
+          String(parseFloat(v as string))
+        );
+      } else {
+        // Regular numeric column
+        column.type = "numeric";
+        column.values = column.values.map((v) => parseFloat(v as string) || 0);
+      }
       return;
     }
 
