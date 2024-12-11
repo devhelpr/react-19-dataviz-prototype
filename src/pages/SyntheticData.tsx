@@ -232,29 +232,38 @@ function calculateColumnCorrelation(
   original: ColumnData,
   synthetic: ColumnData
 ): number {
-  // If columns are of different types, correlation is 0
   if (original.type !== synthetic.type) return 0;
 
   switch (original.type) {
     case "numeric": {
-      // Normalize numeric values before correlation
       const origValues = original.values as number[];
       const synthValues = synthetic.values as number[];
 
-      // Normalize to [0,1] range to make correlations comparable
+      // Handle edge cases
+      if (origValues.length === 0 || synthValues.length === 0) return 0;
+
+      const origRange = Math.max(...origValues) - Math.min(...origValues);
+      const synthRange = Math.max(...synthValues) - Math.min(...synthValues);
+
+      // If either dataset has no variation, correlation is undefined
+      if (origRange === 0 || synthRange === 0) return 1;
+
+      // Normalize values
       const origMin = Math.min(...origValues);
-      const origMax = Math.max(...origValues);
       const synthMin = Math.min(...synthValues);
-      const synthMax = Math.max(...synthValues);
 
-      const normalizedOrig = origValues.map(
-        (v) => (v - origMin) / (origMax - origMin)
-      );
+      const normalizedOrig = origValues.map((v) => (v - origMin) / origRange);
       const normalizedSynth = synthValues.map(
-        (v) => (v - synthMin) / (synthMax - synthMin)
+        (v) => (v - synthMin) / synthRange
       );
 
-      return calculatePearsonCorrelation(normalizedOrig, normalizedSynth);
+      const correlation = calculatePearsonCorrelation(
+        normalizedOrig,
+        normalizedSynth
+      );
+
+      // Handle NaN case (can happen with constant values)
+      return isNaN(correlation) ? 1 : correlation;
     }
     case "date": {
       const origTimestamps = (original.values as Date[]).map((d) =>
@@ -326,10 +335,12 @@ function calculatePearsonCorrelation(x: number[], y: number[]): number {
     denominatorY += diffY * diffY;
   }
 
-  if (denominatorX === 0 || denominatorY === 0) return 0;
+  // Handle edge cases that could result in NaN
+  if (denominatorX === 0 && denominatorY === 0) return 1; // Perfect correlation for identical constant values
+  if (denominatorX === 0 || denominatorY === 0) return 0; // No correlation if one set is constant
 
   const correlation = numerator / Math.sqrt(denominatorX * denominatorY);
-  return Math.max(-1, Math.min(1, correlation)); // Ensure result is between -1 and 1
+  return Math.max(-1, Math.min(1, correlation));
 }
 
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
@@ -582,30 +593,42 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       .domain(originalColumns)
       .padding(0.05);
 
-    // Add cells
-    g.selectAll("rect")
+    // Create cell groups
+    const cellGroups = g
+      .selectAll(".cell")
       .data(matrixCorrelations)
-      .enter()
+      .join("g")
+      .attr("class", "cell")
+      .attr(
+        "transform",
+        (d) =>
+          `translate(${xScale(d.syntheticColumn)},${yScale(d.originalColumn)})`
+      );
+
+    // Add rectangles to cells
+    cellGroups
       .append("rect")
-      .attr("x", (d) => xScale(d.syntheticColumn)!)
-      .attr("y", (d) => yScale(d.originalColumn)!)
       .attr("width", xScale.bandwidth())
       .attr("height", yScale.bandwidth())
       .attr("fill", (d) => colorScale(d.correlation))
       .attr("stroke", "white")
       .attr("stroke-width", 1);
 
-    // Add correlation values
-    g.selectAll(".correlation-text")
-      .data(matrixCorrelations)
-      .enter()
+    // Add text to cells
+    cellGroups
       .append("text")
-      .attr("class", "correlation-text")
-      .attr("x", (d) => xScale(d.syntheticColumn)! + xScale.bandwidth() / 2)
-      .attr("y", (d) => yScale(d.originalColumn)! + yScale.bandwidth() / 2)
+      .attr("x", xScale.bandwidth() / 2)
+      .attr("y", yScale.bandwidth() / 2)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
-      .style("fill", (d) => (Math.abs(d.correlation) > 0.5 ? "white" : "black"))
+      .style("fill", (d) => {
+        const color = d3.color(colorScale(d.correlation));
+        if (!color) return "black";
+        // Calculate perceived brightness (using relative luminance formula)
+        const luminance =
+          (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) / 255;
+        return luminance < 0.5 ? "white" : "black";
+      })
       .style("font-size", "10px")
       .text((d) => d.correlation.toFixed(2));
 
