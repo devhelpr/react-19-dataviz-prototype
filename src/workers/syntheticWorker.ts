@@ -23,16 +23,23 @@ function calculateStats(data: DataPoint[]) {
   const categories = Array.from(new Set(data.map((d) => d.category)));
 
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance =
-    values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
+  const sortedValues = [...values].sort((a, b) => a - b);
+  const q1 = sortedValues[Math.floor(values.length * 0.25)];
+  const q3 = sortedValues[Math.floor(values.length * 0.75)];
+  const iqr = q3 - q1;
+
+  const stdDev = iqr / 1.349;
 
   return {
     meanValue: mean,
-    stdValue: Math.sqrt(variance),
+    stdValue: stdDev,
+    minValue: Math.min(...values),
+    maxValue: Math.max(...values),
+    q1,
+    q3,
     minDate: Math.min(...dates),
     maxDate: Math.max(...dates),
     categories,
-    // Store category frequencies
     categoryFreq: categories.map((cat) => ({
       value: cat,
       freq: data.filter((d) => d.category === cat).length / data.length,
@@ -40,14 +47,25 @@ function calculateStats(data: DataPoint[]) {
   };
 }
 
-// Add Box-Muller transform for better normal distribution
-function generateNormal(mean: number, std: number): number {
-  let u = 0,
-    v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
-  const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-  return mean + z * std;
+function generateNormal(
+  mean: number,
+  std: number,
+  min?: number,
+  max?: number
+): number {
+  let value;
+  do {
+    let u = 0,
+      v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    value = mean + z * std;
+  } while (
+    (min !== undefined && value < min) ||
+    (max !== undefined && value > max)
+  );
+  return value;
 }
 
 self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
@@ -66,18 +84,19 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         for (let i = 0; i < numRecords; i += batchSize) {
           const batchCount = Math.min(batchSize, numRecords - i);
 
-          // Generate synthetic data based on original distribution
           const batch = Array.from({ length: batchCount }, () => {
-            // Generate value using Box-Muller transform
-            const value = generateNormal(stats.meanValue, stats.stdValue);
+            const value = generateNormal(
+              stats.meanValue,
+              stats.stdValue,
+              stats.minValue * 0.9,
+              stats.maxValue * 1.1
+            );
 
-            // Generate date with slight clustering around original dates
-            const dateNoise = stats.stdValue * 86400000; // Convert to milliseconds
+            const dateNoise = stats.stdValue * 86400000;
             const dateBase =
               stats.minDate + Math.random() * (stats.maxDate - stats.minDate);
             const date = new Date(dateBase + generateNormal(0, dateNoise));
 
-            // Use category frequencies for more realistic category distribution
             const rand = Math.random();
             let cumProb = 0;
             let category = stats.categories[0];
@@ -91,7 +110,7 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
 
             return {
               date,
-              value: Math.max(0, value), // Ensure non-negative values
+              value: Math.max(0, value),
               category,
             };
           });

@@ -232,66 +232,75 @@ function calculateColumnCorrelation(
   original: ColumnData,
   synthetic: ColumnData
 ): number {
+  // If columns are of different types, correlation is 0
   if (original.type !== synthetic.type) return 0;
 
   switch (original.type) {
     case "numeric": {
-      // Direct correlation for numeric values
-      return calculatePearsonCorrelation(
-        original.values as number[],
-        synthetic.values as number[]
+      // Normalize numeric values before correlation
+      const origValues = original.values as number[];
+      const synthValues = synthetic.values as number[];
+
+      // Normalize to [0,1] range to make correlations comparable
+      const origMin = Math.min(...origValues);
+      const origMax = Math.max(...origValues);
+      const synthMin = Math.min(...synthValues);
+      const synthMax = Math.max(...synthValues);
+
+      const normalizedOrig = origValues.map(
+        (v) => (v - origMin) / (origMax - origMin)
       );
+      const normalizedSynth = synthValues.map(
+        (v) => (v - synthMin) / (synthMax - synthMin)
+      );
+
+      return calculatePearsonCorrelation(normalizedOrig, normalizedSynth);
     }
     case "date": {
-      // Convert dates to timestamps for correlation
       const origTimestamps = (original.values as Date[]).map((d) =>
         d.getTime()
       );
       const synthTimestamps = (synthetic.values as Date[]).map((d) =>
         d.getTime()
       );
-      // Normalize timestamps to prevent numerical overflow
+
+      // Normalize timestamps
       const minTime = Math.min(...origTimestamps, ...synthTimestamps);
-      const normalizedOrig = origTimestamps.map(
-        (t) => (t - minTime) / (1000 * 60 * 60 * 24)
-      ); // Convert to days
-      const normalizedSynth = synthTimestamps.map(
-        (t) => (t - minTime) / (1000 * 60 * 60 * 24)
-      );
+      const maxTime = Math.max(...origTimestamps, ...synthTimestamps);
+      const range = maxTime - minTime;
+
+      const normalizedOrig = origTimestamps.map((t) => (t - minTime) / range);
+      const normalizedSynth = synthTimestamps.map((t) => (t - minTime) / range);
+
       return calculatePearsonCorrelation(normalizedOrig, normalizedSynth);
     }
     case "categorical": {
-      // Calculate category distribution similarity
       const allCategories = Array.from(
         new Set([...original.values, ...synthetic.values] as string[])
-      );
+      ).sort();
 
-      // Calculate frequency distributions
-      const origFreq = new Map<string, number>();
-      const synthFreq = new Map<string, number>();
-
-      allCategories.forEach((cat) => {
-        origFreq.set(cat, 0);
-        synthFreq.set(cat, 0);
-      });
+      // Create frequency vectors
+      const origFreq = new Array(allCategories.length).fill(0);
+      const synthFreq = new Array(allCategories.length).fill(0);
 
       (original.values as string[]).forEach((val) => {
-        origFreq.set(val, (origFreq.get(val) || 0) + 1);
+        const idx = allCategories.indexOf(val);
+        origFreq[idx]++;
       });
 
       (synthetic.values as string[]).forEach((val) => {
-        synthFreq.set(val, (synthFreq.get(val) || 0) + 1);
+        const idx = allCategories.indexOf(val);
+        synthFreq[idx]++;
       });
 
-      // Convert to arrays and normalize
-      const origDist = Array.from(origFreq.values()).map(
-        (v) => v / original.values.length
-      );
-      const synthDist = Array.from(synthFreq.values()).map(
-        (v) => v / synthetic.values.length
-      );
+      // Normalize frequencies
+      const origTotal = origFreq.reduce((a, b) => a + b, 0);
+      const synthTotal = synthFreq.reduce((a, b) => a + b, 0);
 
-      return calculatePearsonCorrelation(origDist, synthDist);
+      const origNorm = origFreq.map((v) => v / origTotal);
+      const synthNorm = synthFreq.map((v) => v / synthTotal);
+
+      return calculatePearsonCorrelation(origNorm, synthNorm);
     }
     default:
       return 0;
@@ -497,15 +506,17 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
       // Calculate matrix correlations
       const matrixCorrelations: MatrixCorrelation[] = [];
-      for (let i = 0; i < selectedCols.length; i++) {
-        for (let j = 0; j < selectedCols.length; j++) {
-          const origCol = selectedCols[i];
-          const synthCol = synthetic[j];
-          const correlation = calculateColumnCorrelation(origCol, synthCol);
+      const allColumns = [...selectedCols, ...synthetic];
+
+      for (let i = 0; i < allColumns.length; i++) {
+        for (let j = 0; j < allColumns.length; j++) {
+          const col1 = allColumns[i];
+          const col2 = allColumns[j];
+          const correlation = calculateColumnCorrelation(col1, col2);
 
           matrixCorrelations.push({
-            originalColumn: origCol.name,
-            syntheticColumn: synthCol.name,
+            originalColumn: col1.name,
+            syntheticColumn: col2.name,
             correlation: correlation,
           });
         }
