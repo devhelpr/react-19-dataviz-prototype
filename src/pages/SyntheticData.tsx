@@ -640,7 +640,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
         const color = d3.color(colorScale(d.correlation));
         if (!color) return "black";
 
-        // Get RGB values using d3.rgb()
+        // Get RGB values using d3.rgb() ..
         const rgb = d3.rgb(color);
 
         // Calculate perceived brightness
