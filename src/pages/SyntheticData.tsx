@@ -497,15 +497,19 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
 
       // Calculate matrix correlations
       const matrixCorrelations: MatrixCorrelation[] = [];
-      selectedCols.forEach((origCol) => {
-        synthetic.forEach((synthCol) => {
+      for (let i = 0; i < selectedCols.length; i++) {
+        for (let j = 0; j < selectedCols.length; j++) {
+          const origCol = selectedCols[i];
+          const synthCol = synthetic[j];
+          const correlation = calculateColumnCorrelation(origCol, synthCol);
+
           matrixCorrelations.push({
-            originalColumn: `${origCol.name} (Original)`,
-            syntheticColumn: `${synthCol.name} (Synthetic)`,
-            correlation: calculateColumnCorrelation(origCol, synthCol),
+            originalColumn: origCol.name,
+            syntheticColumn: synthCol.name,
+            correlation: correlation,
           });
-        });
-      });
+        }
+      }
       setMatrixCorrelations(matrixCorrelations);
     } catch (err) {
       setError(
