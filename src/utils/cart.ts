@@ -39,7 +39,15 @@ function calculateMSE(data: DataPoint[]): number {
   return d3.sum(data, (d) => Math.pow(d.value - mean, 2)) / data.length;
 }
 
-// Find best split for numerical features
+// Add these optimizations at the top of the file
+function findQuantiles(values: number[]): { q1: number; q3: number } {
+  const sorted = values.slice().sort((a, b) => a - b);
+  const q1Index = Math.floor(values.length * 0.25);
+  const q3Index = Math.floor(values.length * 0.75);
+  return { q1: sorted[q1Index], q3: sorted[q3Index] };
+}
+
+// Optimize numerical split finding
 function findBestNumericalSplit(
   data: DataPoint[],
   feature: "date" | "value"
@@ -47,29 +55,59 @@ function findBestNumericalSplit(
   threshold: number;
   score: number;
 } {
-  const values = data
-    .map((d) => (feature === "date" ? d.date.getTime() : d.value))
-    .sort((a, b) => a - b);
-  const uniqueValues = Array.from(new Set(values));
+  // Extract and sort values once
+  const values = data.map((d) =>
+    feature === "date" ? d.date.getTime() : d.value
+  );
+  const { q1, q3 } = findQuantiles(values);
+  const iqr = q3 - q1;
 
-  let bestThreshold = uniqueValues[0];
+  // Use quantile-based candidate thresholds instead of all unique values
+  const candidateThresholds = [
+    q1 - 1.5 * iqr,
+    q1,
+    q1 + (q3 - q1) / 3,
+    q1 + (2 * (q3 - q1)) / 3,
+    q3,
+    q3 + 1.5 * iqr,
+  ];
+
+  let bestThreshold = candidateThresholds[0];
   let bestScore = Infinity;
+  const total = data.length;
 
-  // Try all possible splits
-  for (let i = 0; i < uniqueValues.length - 1; i++) {
-    const threshold = (uniqueValues[i] + uniqueValues[i + 1]) / 2;
-    const leftData = data.filter((d) =>
-      feature === "date" ? d.date.getTime() <= threshold : d.value <= threshold
-    );
-    const rightData = data.filter((d) =>
-      feature === "date" ? d.date.getTime() > threshold : d.value > threshold
-    );
+  // Pre-calculate sums for efficiency
+  const totalSum = d3.sum(data, (d) => d.value);
+  const totalSqSum = d3.sum(data, (d) => d.value * d.value);
 
-    // Calculate weighted MSE
-    const score =
-      (leftData.length * calculateMSE(leftData) +
-        rightData.length * calculateMSE(rightData)) /
-      data.length;
+  for (const threshold of candidateThresholds) {
+    let leftSum = 0;
+    let leftSqSum = 0;
+    let leftCount = 0;
+
+    // Single pass through data
+    for (const d of data) {
+      const val = feature === "date" ? d.date.getTime() : d.value;
+      if (val <= threshold) {
+        leftCount++;
+        leftSum += d.value;
+        leftSqSum += d.value * d.value;
+      }
+    }
+
+    const rightCount = total - leftCount;
+    if (leftCount === 0 || rightCount === 0) continue;
+
+    const rightSum = totalSum - leftSum;
+    const rightSqSum = totalSqSum - leftSqSum;
+
+    // Calculate MSE efficiently
+    const leftMean = leftSum / leftCount;
+    const rightMean = rightSum / rightCount;
+    const leftMSE = leftSqSum / leftCount - leftMean * leftMean;
+    const rightMSE = rightSqSum / rightCount - rightMean * rightMean;
+
+    const score = (leftCount * leftMSE + rightCount * rightMSE) / total;
 
     if (score < bestScore) {
       bestScore = score;
@@ -80,23 +118,50 @@ function findBestNumericalSplit(
   return { threshold: bestThreshold, score: bestScore };
 }
 
-// Find best categorical split
+// Optimize categorical split finding
 function findBestCategoricalSplit(data: DataPoint[]): {
   threshold: string;
   score: number;
 } {
-  const categories = Array.from(new Set(data.map((d) => d.category))).sort();
+  // Use Map for frequency counting
+  const categoryFreq = new Map<string, number>();
+  const categoryValues = new Map<string, number>();
+  const categorySquares = new Map<string, number>();
+
+  // Single pass through data
+  for (const d of data) {
+    categoryFreq.set(d.category, (categoryFreq.get(d.category) || 0) + 1);
+    categoryValues.set(
+      d.category,
+      (categoryValues.get(d.category) || 0) + d.value
+    );
+    categorySquares.set(
+      d.category,
+      (categorySquares.get(d.category) || 0) + d.value * d.value
+    );
+  }
+
+  const categories = Array.from(categoryFreq.keys()).sort();
   let bestThreshold = categories[0];
   let bestScore = Infinity;
+  const total = data.length;
 
   for (const category of categories) {
-    const leftData = data.filter((d) => d.category <= category);
-    const rightData = data.filter((d) => d.category > category);
+    const leftCount = categoryFreq.get(category) || 0;
+    const rightCount = total - leftCount;
+    if (leftCount === 0 || rightCount === 0) continue;
 
-    const score =
-      (leftData.length * calculateGiniImpurity(leftData) +
-        rightData.length * calculateGiniImpurity(rightData)) /
-      data.length;
+    const leftSum = categoryValues.get(category) || 0;
+    const leftSqSum = categorySquares.get(category) || 0;
+    const rightSum = d3.sum(Array.from(categoryValues.values())) - leftSum;
+    const rightSqSum = d3.sum(Array.from(categorySquares.values())) - leftSqSum;
+
+    const leftMean = leftSum / leftCount;
+    const rightMean = rightSum / rightCount;
+    const leftMSE = leftSqSum / leftCount - leftMean * leftMean;
+    const rightMSE = rightSqSum / rightCount - rightMean * rightMean;
+
+    const score = (leftCount * leftMSE + rightCount * rightMSE) / total;
 
     if (score < bestScore) {
       bestScore = score;
