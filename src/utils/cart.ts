@@ -359,6 +359,12 @@ function createLeafNode(data: DataPoint[]): TreeNode {
   // Get categories (always treat as valid)
   const categories = Array.from(new Set(cleanData.map((d) => d.category)));
 
+  // Create default date range
+  const defaultDateRange: [Date, Date] = [
+    new Date(),
+    new Date(Date.now() + 24 * 60 * 60 * 1000),
+  ];
+
   // Calculate statistics only if we have valid values
   const stats =
     values.length > 0
@@ -372,15 +378,14 @@ function createLeafNode(data: DataPoint[]): TreeNode {
               : 1
           ),
           dateRange:
-            dates.length > 0
-              ? [d3.min(dates)!, d3.max(dates)!]
-              : [new Date(), new Date(Date.now() + 24 * 60 * 60 * 1000)],
+            dates.length >= 2
+              ? ([d3.min(dates)!, d3.max(dates)!] as [Date, Date])
+              : defaultDateRange,
         }
       : {
-          // More reasonable defaults based on the data context
           meanValue: 0,
           stdValue: 1,
-          dateRange: [new Date(), new Date(Date.now() + 24 * 60 * 60 * 1000)],
+          dateRange: defaultDateRange,
         };
 
   // Calculate category frequencies
