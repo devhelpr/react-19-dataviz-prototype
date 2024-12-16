@@ -474,11 +474,11 @@ function DistributionChart({
       // For categorical columns, create grouped bar chart
       const categories = Array.from(
         new Set([...originalColumn.values, ...syntheticColumn.values])
-      );
+      ).map(String);
 
       const x0 = d3
         .scaleBand()
-        .domain(categories as string[])
+        .domain(categories)
         .rangeRound([0, width])
         .paddingInner(0.1);
 
@@ -492,19 +492,20 @@ function DistributionChart({
       const origTotal = originalColumn.values.length;
       const synthTotal = syntheticColumn.values.length;
 
-      const origCounts = new Map();
-      const synthCounts = new Map();
+      const origCounts = new Map<string, number>();
+      const synthCounts = new Map<string, number>();
 
       categories.forEach((cat) => {
         origCounts.set(
           cat,
-          ((originalColumn.values as string[]).filter((v) => v === cat).length /
+          ((originalColumn.values as string[]).filter((v) => String(v) === cat)
+            .length /
             origTotal) *
             100
         );
         synthCounts.set(
           cat,
-          ((syntheticColumn.values as string[]).filter((v) => v === cat)
+          ((syntheticColumn.values as string[]).filter((v) => String(v) === cat)
             .length /
             synthTotal) *
             100
