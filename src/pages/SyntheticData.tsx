@@ -523,9 +523,9 @@ function DistributionChart({
         .data(categories)
         .join("rect")
         .attr("x", (d) => x0(d)! + x1("original")!)
-        .attr("y", (d) => y(origCounts.get(d)))
+        .attr("y", (d) => y(origCounts.get(d) || 0))
         .attr("width", x1.bandwidth())
-        .attr("height", (d) => height - y(origCounts.get(d)))
+        .attr("height", (d) => height - y(origCounts.get(d) || 0))
         .attr("fill", "blue")
         .attr("fill-opacity", 0.5);
 
@@ -535,9 +535,9 @@ function DistributionChart({
         .data(categories)
         .join("rect")
         .attr("x", (d) => x0(d)! + x1("synthetic")!)
-        .attr("y", (d) => y(synthCounts.get(d)))
+        .attr("y", (d) => y(synthCounts.get(d) || 0))
         .attr("width", x1.bandwidth())
-        .attr("height", (d) => height - y(synthCounts.get(d)))
+        .attr("height", (d) => height - y(synthCounts.get(d) || 0))
         .attr("fill", "red")
         .attr("fill-opacity", 0.5);
 
