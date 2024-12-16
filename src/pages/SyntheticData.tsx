@@ -402,14 +402,19 @@ function DistributionChart({
       const origBins = histogram(originalColumn.values as number[]);
       const synthBins = histogram(syntheticColumn.values as number[]);
 
+      // Convert to percentages
+      const origTotal = originalColumn.values.length;
+      const synthTotal = syntheticColumn.values.length;
+      const origPercentages = origBins.map((b) => (b.length / origTotal) * 100);
+      const synthPercentages = synthBins.map(
+        (b) => (b.length / synthTotal) * 100
+      );
+
       const y = d3
         .scaleLinear()
         .domain([
           0,
-          Math.max(
-            d3.max(origBins, (d) => d.length) || 0,
-            d3.max(synthBins, (d) => d.length) || 0
-          ),
+          Math.max(d3.max(origPercentages) || 0, d3.max(synthPercentages) || 0),
         ])
         .range([height, 0]);
 
@@ -422,8 +427,8 @@ function DistributionChart({
         .join("rect")
         .attr("x", (d) => x(d.x0 || 0))
         .attr("width", (d) => Math.max(0, x(d.x1 || 0) - x(d.x0 || 0) - 1))
-        .attr("y", (d) => y(d.length))
-        .attr("height", (d) => y(0) - y(d.length));
+        .attr("y", (d) => y((d.length / origTotal) * 100))
+        .attr("height", (d) => y(0) - y((d.length / origTotal) * 100));
 
       // Synthetic data histogram
       g.append("g")
@@ -434,8 +439,8 @@ function DistributionChart({
         .join("rect")
         .attr("x", (d) => x(d.x0 || 0))
         .attr("width", (d) => Math.max(0, x(d.x1 || 0) - x(d.x0 || 0) - 1))
-        .attr("y", (d) => y(d.length))
-        .attr("height", (d) => y(0) - y(d.length));
+        .attr("y", (d) => y((d.length / synthTotal) * 100))
+        .attr("height", (d) => y(0) - y((d.length / synthTotal) * 100));
 
       // Add axes
       xAxis = g
@@ -462,17 +467,26 @@ function DistributionChart({
         .rangeRound([0, x0.bandwidth()])
         .padding(0.05);
 
+      // Calculate percentages
+      const origTotal = originalColumn.values.length;
+      const synthTotal = syntheticColumn.values.length;
+
       const origCounts = new Map();
       const synthCounts = new Map();
 
       categories.forEach((cat) => {
         origCounts.set(
           cat,
-          (originalColumn.values as string[]).filter((v) => v === cat).length
+          ((originalColumn.values as string[]).filter((v) => v === cat).length /
+            origTotal) *
+            100
         );
         synthCounts.set(
           cat,
-          (syntheticColumn.values as string[]).filter((v) => v === cat).length
+          ((syntheticColumn.values as string[]).filter((v) => v === cat)
+            .length /
+            synthTotal) *
+            100
         );
       });
 
@@ -539,6 +553,15 @@ function DistributionChart({
       .attr("y", 9.5)
       .attr("dy", "0.32em")
       .text((d) => d);
+
+    // Update y-axis label to show percentage
+    g.append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("y", -margin.left)
+      .attr("x", -height / 2)
+      .attr("dy", "1em")
+      .style("text-anchor", "middle")
+      .text("Percentage (%)");
   }, [originalColumn, syntheticColumn]);
 
   return <svg ref={chartRef} />;
