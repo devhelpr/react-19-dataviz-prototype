@@ -260,16 +260,24 @@ function generateFeatureValue(node: TreeNode): DataPoint {
     !node.feature ||
     node.threshold === undefined
   ) {
+    // For leaf nodes, generate values that better match the distribution
     const date = new Date(
       node.value.dateRange[0].getTime() +
         Math.random() *
           (node.value.dateRange[1].getTime() -
             node.value.dateRange[0].getTime())
     );
-    const value = Math.max(
-      0,
-      d3.randomNormal(node.value.meanValue, node.value.stdValue)()
-    );
+
+    // Improved numeric value generation using Box-Muller transform
+    let value;
+    do {
+      let u1 = Math.random();
+      let u2 = Math.random();
+      while (u1 === 0) u1 = Math.random(); // u1 must not be zero
+
+      const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+      value = node.value.meanValue + z * node.value.stdValue;
+    } while (value < 0); // Ensure non-negative values
 
     // Use stored category frequencies for weighted selection
     const rand = Math.random();
