@@ -38,6 +38,12 @@ interface TableState {
   sortDirection: "asc" | "desc";
 }
 
+interface HistogramBin extends d3.Bin<number, number> {
+  x0: number;
+  x1: number;
+  length: number;
+}
+
 const worker = new Worker();
 
 console.log("Worker initialized:", worker);
@@ -397,10 +403,19 @@ function DistributionChart({
       const xDomain = [Math.min(...allValues), Math.max(...allValues)];
 
       const x = d3.scaleLinear().domain(xDomain).range([0, width]);
-      const histogram = d3.histogram().domain(x.domain()).thresholds(20);
 
-      const origBins = histogram(originalColumn.values as number[]);
-      const synthBins = histogram(syntheticColumn.values as number[]);
+      // Fix histogram configuration
+      const histogram = d3
+        .bin<number, number>()
+        .domain(x.domain() as [number, number])
+        .thresholds(x.ticks(20));
+
+      const origBins = histogram(
+        originalColumn.values as number[]
+      ) as HistogramBin[];
+      const synthBins = histogram(
+        syntheticColumn.values as number[]
+      ) as HistogramBin[];
 
       // Convert to percentages
       const origTotal = originalColumn.values.length;
@@ -425,10 +440,13 @@ function DistributionChart({
         .selectAll("rect")
         .data(origBins)
         .join("rect")
-        .attr("x", (d) => x(d.x0 || 0))
-        .attr("width", (d) => Math.max(0, x(d.x1 || 0) - x(d.x0 || 0) - 1))
-        .attr("y", (d) => y((d.length / origTotal) * 100))
-        .attr("height", (d) => y(0) - y((d.length / origTotal) * 100));
+        .attr("x", (d: HistogramBin) => x(d.x0))
+        .attr("width", (d: HistogramBin) => Math.max(0, x(d.x1) - x(d.x0) - 1))
+        .attr("y", (d: HistogramBin) => y((d.length / origTotal) * 100))
+        .attr(
+          "height",
+          (d: HistogramBin) => y(0) - y((d.length / origTotal) * 100)
+        );
 
       // Synthetic data histogram
       g.append("g")
@@ -437,10 +455,13 @@ function DistributionChart({
         .selectAll("rect")
         .data(synthBins)
         .join("rect")
-        .attr("x", (d) => x(d.x0 || 0))
-        .attr("width", (d) => Math.max(0, x(d.x1 || 0) - x(d.x0 || 0) - 1))
-        .attr("y", (d) => y((d.length / synthTotal) * 100))
-        .attr("height", (d) => y(0) - y((d.length / synthTotal) * 100));
+        .attr("x", (d: HistogramBin) => x(d.x0))
+        .attr("width", (d: HistogramBin) => Math.max(0, x(d.x1) - x(d.x0) - 1))
+        .attr("y", (d: HistogramBin) => y((d.length / synthTotal) * 100))
+        .attr(
+          "height",
+          (d: HistogramBin) => y(0) - y((d.length / synthTotal) * 100)
+        );
 
       // Add axes
       xAxis = g
