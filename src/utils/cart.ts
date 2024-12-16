@@ -6,6 +6,7 @@ interface TreeNode {
   threshold?: Date | string | number;
   value?: {
     category: string;
+    categoryFrequencies: Map<string, number>;
     meanValue: number;
     stdValue: number;
     dateRange: [Date, Date];
@@ -218,13 +219,22 @@ function buildDecisionTree(
 }
 
 function createLeafNode(data: DataPoint[]): TreeNode {
-  const categories = Array.from(new Set(data.map((d) => d.category))).join(",");
+  const categories = Array.from(new Set(data.map((d) => d.category)));
   const dates = data.map((d) => d.date);
   const values = data.map((d) => d.value);
 
+  // Calculate actual category frequencies
+  const categoryFrequencies = new Map<string, number>();
+  categories.forEach((cat) => {
+    const count = data.filter((d) => d.category === cat).length;
+    const frequency = count / data.length;
+    categoryFrequencies.set(cat, frequency);
+  });
+
   return {
     value: {
-      category: categories, // Store all unique categories
+      category: categories.join(","),
+      categoryFrequencies,
       meanValue: d3.mean(values) || 0,
       stdValue: Math.max(
         d3.deviation(values) || 1,
@@ -244,7 +254,6 @@ function generateFeatureValue(node: TreeNode): DataPoint {
     throw new Error("Node missing value statistics");
   }
 
-  // If it's a leaf node, generate value based on leaf statistics
   if (
     !node.left ||
     !node.right ||
@@ -261,10 +270,21 @@ function generateFeatureValue(node: TreeNode): DataPoint {
       0,
       d3.randomNormal(node.value.meanValue, node.value.stdValue)()
     );
-    const categories = node.value.category.split(",");
-    const category = categories[Math.floor(Math.random() * categories.length)];
 
-    return { date, value, category };
+    // Use stored category frequencies for weighted selection
+    const rand = Math.random();
+    let cumProb = 0;
+    let selectedCategory = node.value.category.split(",")[0];
+
+    for (const [cat, freq] of node.value.categoryFrequencies) {
+      cumProb += freq;
+      if (rand <= cumProb) {
+        selectedCategory = cat;
+        break;
+      }
+    }
+
+    return { date, value, category: selectedCategory };
   }
 
   // For non-leaf nodes, make decision based on threshold
