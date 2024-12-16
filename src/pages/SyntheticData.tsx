@@ -1,8 +1,10 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, Fragment } from "react";
 import * as d3 from "d3";
 import { DataPoint } from "../types";
 import { ArrowPathIcon } from "@heroicons/react/24/solid";
 import Worker from "../workers/syntheticWorker?worker";
+import { Listbox, Transition } from "@headlessui/react";
+import { ChevronUpDownIcon } from "@heroicons/react/24/solid";
 
 interface SyntheticDataProps {
   data: DataPoint[];
@@ -358,6 +360,190 @@ function calculatePearsonCorrelation(x: number[], y: number[]): number {
   return Math.max(-1, Math.min(1, correlation));
 }
 
+function DistributionChart({
+  originalColumn,
+  syntheticColumn,
+}: {
+  originalColumn: ColumnData;
+  syntheticColumn: ColumnData;
+}) {
+  const chartRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    const svg = d3.select(chartRef.current);
+    svg.selectAll("*").remove();
+
+    const margin = { top: 20, right: 20, bottom: 30, left: 40 };
+    const width = 600 - margin.left - margin.right;
+    const height = 300 - margin.top - margin.bottom;
+
+    const g = svg
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    let xAxis: d3.Selection<SVGGElement, unknown, null, undefined>;
+    let yAxis: d3.Selection<SVGGElement, unknown, null, undefined>;
+
+    if (originalColumn.type === "numeric") {
+      // For numeric columns, create overlapping histograms
+      const allValues = [
+        ...(originalColumn.values as number[]),
+        ...(syntheticColumn.values as number[]),
+      ];
+      const xDomain = [Math.min(...allValues), Math.max(...allValues)];
+
+      const x = d3.scaleLinear().domain(xDomain).range([0, width]);
+      const histogram = d3.histogram().domain(x.domain()).thresholds(20);
+
+      const origBins = histogram(originalColumn.values as number[]);
+      const synthBins = histogram(syntheticColumn.values as number[]);
+
+      const y = d3
+        .scaleLinear()
+        .domain([
+          0,
+          Math.max(
+            d3.max(origBins, (d) => d.length) || 0,
+            d3.max(synthBins, (d) => d.length) || 0
+          ),
+        ])
+        .range([height, 0]);
+
+      // Original data histogram
+      g.append("g")
+        .attr("fill", "blue")
+        .attr("fill-opacity", 0.3)
+        .selectAll("rect")
+        .data(origBins)
+        .join("rect")
+        .attr("x", (d) => x(d.x0 || 0))
+        .attr("width", (d) => Math.max(0, x(d.x1 || 0) - x(d.x0 || 0) - 1))
+        .attr("y", (d) => y(d.length))
+        .attr("height", (d) => y(0) - y(d.length));
+
+      // Synthetic data histogram
+      g.append("g")
+        .attr("fill", "red")
+        .attr("fill-opacity", 0.3)
+        .selectAll("rect")
+        .data(synthBins)
+        .join("rect")
+        .attr("x", (d) => x(d.x0 || 0))
+        .attr("width", (d) => Math.max(0, x(d.x1 || 0) - x(d.x0 || 0) - 1))
+        .attr("y", (d) => y(d.length))
+        .attr("height", (d) => y(0) - y(d.length));
+
+      // Add axes
+      xAxis = g
+        .append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(x));
+
+      yAxis = g.append("g").call(d3.axisLeft(y));
+    } else if (originalColumn.type === "categorical") {
+      // For categorical columns, create grouped bar chart
+      const categories = Array.from(
+        new Set([...originalColumn.values, ...syntheticColumn.values])
+      );
+
+      const x0 = d3
+        .scaleBand()
+        .domain(categories as string[])
+        .rangeRound([0, width])
+        .paddingInner(0.1);
+
+      const x1 = d3
+        .scaleBand()
+        .domain(["original", "synthetic"])
+        .rangeRound([0, x0.bandwidth()])
+        .padding(0.05);
+
+      const origCounts = new Map();
+      const synthCounts = new Map();
+
+      categories.forEach((cat) => {
+        origCounts.set(
+          cat,
+          (originalColumn.values as string[]).filter((v) => v === cat).length
+        );
+        synthCounts.set(
+          cat,
+          (syntheticColumn.values as string[]).filter((v) => v === cat).length
+        );
+      });
+
+      const y = d3
+        .scaleLinear()
+        .domain([0, Math.max(...origCounts.values(), ...synthCounts.values())])
+        .range([height, 0]);
+
+      // Add bars for original data
+      g.append("g")
+        .selectAll("rect")
+        .data(categories)
+        .join("rect")
+        .attr("x", (d) => x0(d)! + x1("original")!)
+        .attr("y", (d) => y(origCounts.get(d)))
+        .attr("width", x1.bandwidth())
+        .attr("height", (d) => height - y(origCounts.get(d)))
+        .attr("fill", "blue")
+        .attr("fill-opacity", 0.5);
+
+      // Add bars for synthetic data
+      g.append("g")
+        .selectAll("rect")
+        .data(categories)
+        .join("rect")
+        .attr("x", (d) => x0(d)! + x1("synthetic")!)
+        .attr("y", (d) => y(synthCounts.get(d)))
+        .attr("width", x1.bandwidth())
+        .attr("height", (d) => height - y(synthCounts.get(d)))
+        .attr("fill", "red")
+        .attr("fill-opacity", 0.5);
+
+      // Add axes
+      xAxis = g
+        .append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(x0));
+
+      yAxis = g.append("g").call(d3.axisLeft(y));
+    }
+
+    // Add legend
+    const legend = g
+      .append("g")
+      .attr("font-family", "sans-serif")
+      .attr("font-size", 10)
+      .attr("text-anchor", "start")
+      .selectAll("g")
+      .data(["Original", "Synthetic"])
+      .join("g")
+      .attr("transform", (d, i) => `translate(0,${i * 20})`);
+
+    legend
+      .append("rect")
+      .attr("x", width - 19)
+      .attr("width", 19)
+      .attr("height", 19)
+      .attr("fill", (d, i) => (i === 0 ? "blue" : "red"))
+      .attr("fill-opacity", 0.3);
+
+    legend
+      .append("text")
+      .attr("x", width - 24)
+      .attr("y", 9.5)
+      .attr("dy", "0.32em")
+      .text((d) => d);
+  }, [originalColumn, syntheticColumn]);
+
+  return <svg ref={chartRef} />;
+}
+
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
   const [uploadedColumns, setUploadedColumns] = useState<ColumnData[]>([]);
   const [syntheticColumns, setSyntheticColumns] = useState<ColumnData[]>([]);
@@ -370,6 +556,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
   >([]);
   const [numRecords, setNumRecords] = useState<number>(1000);
   const [progress, setProgress] = useState(0);
+  const [selectedColumn, setSelectedColumn] = useState<ColumnData | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const heatmapRef = useRef<SVGSVGElement>(null);
@@ -759,7 +946,7 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
       {uploadedColumns.length > 0 && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Column Selection */}
+            {/* Left column with column selection */}
             <div className="border p-4 rounded">
               <h3 className="text-lg font-bold mb-3">
                 Select Columns for Synthesis
@@ -840,18 +1027,92 @@ function SyntheticData({ data: initialData }: SyntheticDataProps) {
               </div>
             </div>
 
-            {/* Correlation Heatmap */}
-            {syntheticColumns.length > 0 && (
+            {/* Right column with heatmap and distribution */}
+            <div className="space-y-4">
+              {/* Heatmap */}
               <div className="border p-4 rounded">
                 <h3 className="text-lg font-bold mb-2">Correlation Heatmap</h3>
                 <div className="overflow-x-auto">
                   <svg ref={heatmapRef}></svg>
                 </div>
               </div>
-            )}
+
+              {/* Distribution comparison */}
+              <div>
+                <Listbox value={selectedColumn} onChange={setSelectedColumn}>
+                  <div className="relative mt-1">
+                    <Listbox.Button className="relative w-full cursor-default rounded-lg bg-white py-2 pl-3 pr-10 text-left shadow-md focus:outline-none focus-visible:border-indigo-500 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-opacity-75 focus-visible:ring-offset-2 focus-visible:ring-offset-orange-300 sm:text-sm">
+                      <span className="block truncate">
+                        {selectedColumn
+                          ? selectedColumn.name
+                          : "Select a column"}
+                      </span>
+                      <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                        <ChevronUpDownIcon
+                          className="h-5 w-5 text-gray-400"
+                          aria-hidden="true"
+                        />
+                      </span>
+                    </Listbox.Button>
+                    <Transition
+                      as={Fragment}
+                      leave="transition ease-in duration-100"
+                      leaveFrom="opacity-100"
+                      leaveTo="opacity-0"
+                    >
+                      <Listbox.Options className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm">
+                        {syntheticColumns.map((column) => (
+                          <Listbox.Option
+                            key={column.name}
+                            className={({ active }) =>
+                              `relative cursor-default select-none py-2 pl-10 pr-4 ${
+                                active
+                                  ? "bg-amber-100 text-amber-900"
+                                  : "text-gray-900"
+                              }`
+                            }
+                            value={column}
+                          >
+                            {({ selected }) => (
+                              <>
+                                <span
+                                  className={`block truncate ${
+                                    selected ? "font-medium" : "font-normal"
+                                  }`}
+                                >
+                                  {column.name}
+                                </span>
+                              </>
+                            )}
+                          </Listbox.Option>
+                        ))}
+                      </Listbox.Options>
+                    </Transition>
+                  </div>
+                </Listbox>
+
+                {selectedColumn && (
+                  <div className="mt-4 border p-4 rounded">
+                    <h3 className="text-lg font-bold mb-2">
+                      Distribution Comparison
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <DistributionChart
+                        originalColumn={
+                          uploadedColumns.find(
+                            (c) => c.name === selectedColumn.name
+                          )!
+                        }
+                        syntheticColumn={selectedColumn}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Statistics and Table in full width */}
+          {/* Statistics and Table sections remain at the bottom */}
           {syntheticColumns.length > 0 && (
             <>
               <div className="border p-4 rounded">
