@@ -35,8 +35,12 @@ function calculateGiniImpurity(data: DataPoint[]): number {
 
 // Calculate MSE for numerical splits (value)
 function calculateMSE(data: DataPoint[]): number {
-  const mean = d3.mean(data, (d) => d.value) || 0;
-  return d3.sum(data, (d) => Math.pow(d.value - mean, 2)) / data.length;
+  const validValues = data.map((d) => d.value).filter(isValidNumber);
+
+  if (validValues.length === 0) return 0;
+
+  const mean = d3.mean(validValues) || 0;
+  return d3.sum(validValues, (v) => Math.pow(v - mean, 2)) / validValues.length;
 }
 
 // Add these optimizations at the top of the file
@@ -47,6 +51,50 @@ function findQuantiles(values: number[]): { q1: number; q3: number } {
   return { q1: sorted[q1Index], q3: sorted[q3Index] };
 }
 
+// Add more sophisticated value validation
+function isValidNumber(value: number): boolean {
+  return (
+    typeof value === "number" &&
+    !isNaN(value) &&
+    isFinite(value) &&
+    value !== null &&
+    value !== undefined &&
+    Math.abs(value) < Number.MAX_SAFE_INTEGER // Prevent extreme values
+  );
+}
+
+// Update handleMissingValues to better handle empty values
+function handleMissingValues(data: DataPoint[]): DataPoint[] {
+  // Get valid values for imputation
+  const validValues = data
+    .map((d) => d.value)
+    .filter((v) => v !== null && v !== undefined && !isNaN(v));
+
+  // If we have no valid values, try to find any non-empty value
+  if (validValues.length === 0) {
+    // Return only non-empty values
+    return data.filter(
+      (d) => d.value !== null && d.value !== undefined && !isNaN(d.value)
+    );
+  }
+
+  // Calculate robust statistics for imputation
+  const median = d3.median(validValues) || 0;
+  const { q1, q3 } = findQuantiles(validValues);
+  const iqr = q3 - q1;
+  const lowerBound = q1 - 1.5 * iqr;
+  const upperBound = q3 + 1.5 * iqr;
+
+  // Only replace invalid values, keep valid values unchanged
+  return data.map((d) => {
+    if (d.value === null || d.value === undefined || isNaN(d.value)) {
+      return { ...d, value: median };
+    }
+    // Keep valid values as they are, even if they're outliers
+    return d;
+  });
+}
+
 // Optimize numerical split finding
 function findBestNumericalSplit(
   data: DataPoint[],
@@ -55,10 +103,26 @@ function findBestNumericalSplit(
   threshold: number;
   score: number;
 } {
+  // Handle missing values first
+  const cleanData =
+    feature === "value"
+      ? handleMissingValues(data)
+      : data.filter((d) => d.date instanceof Date);
+
+  if (cleanData.length === 0) {
+    return { threshold: 0, score: Infinity };
+  }
+
+  // Extract values and remove remaining invalid entries
+  const values = cleanData
+    .map((d) => (feature === "date" ? d.date.getTime() : d.value))
+    .filter(isValidNumber);
+
+  if (values.length < 2) {
+    return { threshold: 0, score: Infinity };
+  }
+
   // Extract and sort values once
-  const values = data.map((d) =>
-    feature === "date" ? d.date.getTime() : d.value
-  );
   const { q1, q3 } = findQuantiles(values);
   const iqr = q3 - q1;
 
@@ -284,15 +348,49 @@ function buildDecisionTree(
 }
 
 function createLeafNode(data: DataPoint[]): TreeNode {
-  const categories = Array.from(new Set(data.map((d) => d.category)));
-  const dates = data.map((d) => d.date);
-  const values = data.map((d) => d.value);
+  const cleanData = handleMissingValues(data);
 
-  // Calculate actual category frequencies
+  // Get valid numeric values
+  const values = cleanData.map((d) => d.value).filter(isValidNumber);
+
+  // Get valid dates
+  const dates = cleanData.map((d) => d.date).filter((d) => d instanceof Date);
+
+  // Get categories (always treat as valid)
+  const categories = Array.from(new Set(cleanData.map((d) => d.category)));
+
+  // Calculate statistics only if we have valid values
+  const stats =
+    values.length > 0
+      ? {
+          meanValue: d3.median(values) || 0,
+          stdValue: Math.max(
+            d3.deviation(values) || 1,
+            values.length > 1
+              ? (d3.quantile(values, 0.75)! - d3.quantile(values, 0.25)!) /
+                  1.349
+              : 1
+          ),
+          dateRange:
+            dates.length > 0
+              ? [d3.min(dates)!, d3.max(dates)!]
+              : [new Date(), new Date(Date.now() + 24 * 60 * 60 * 1000)],
+        }
+      : {
+          // More reasonable defaults based on the data context
+          meanValue: 0,
+          stdValue: 1,
+          dateRange: [new Date(), new Date(Date.now() + 24 * 60 * 60 * 1000)],
+        };
+
+  // Calculate category frequencies
   const categoryFrequencies = new Map<string, number>();
+  const smoothingFactor = 0.1;
+  const totalCount = cleanData.length + smoothingFactor * categories.length;
+
   categories.forEach((cat) => {
-    const count = data.filter((d) => d.category === cat).length;
-    const frequency = count / data.length;
+    const count = cleanData.filter((d) => d.category === cat).length;
+    const frequency = (count + smoothingFactor) / totalCount;
     categoryFrequencies.set(cat, frequency);
   });
 
@@ -300,20 +398,14 @@ function createLeafNode(data: DataPoint[]): TreeNode {
     value: {
       category: categories.join(","),
       categoryFrequencies,
-      meanValue: d3.mean(values) || 0,
-      stdValue: Math.max(
-        d3.deviation(values) || 1,
-        values.length > 1
-          ? d3.quantile(values, 0.75)! - d3.quantile(values, 0.25)!
-          : 1
-      ),
-      dateRange: [d3.min(dates) || new Date(), d3.max(dates) || new Date()],
+      ...stats,
     },
-    impurity: calculateMSE(data),
-    samples: data.length,
+    impurity: values.length > 0 ? calculateMSE(cleanData) : 0,
+    samples: cleanData.length,
   };
 }
 
+// Update generateFeatureValue for better numeric value generation
 function generateFeatureValue(node: TreeNode): DataPoint {
   if (!node.value) {
     throw new Error("Node missing value statistics");
@@ -325,7 +417,6 @@ function generateFeatureValue(node: TreeNode): DataPoint {
     !node.feature ||
     node.threshold === undefined
   ) {
-    // For leaf nodes, generate values that better match the distribution
     const date = new Date(
       node.value.dateRange[0].getTime() +
         Math.random() *
@@ -333,16 +424,23 @@ function generateFeatureValue(node: TreeNode): DataPoint {
             node.value.dateRange[0].getTime())
     );
 
-    // Improved numeric value generation using Box-Muller transform
+    // Generate numeric value using inverse transform sampling
     let value;
-    do {
-      let u1 = Math.random();
-      let u2 = Math.random();
-      while (u1 === 0) u1 = Math.random(); // u1 must not be zero
+    if (node.value.meanValue !== 0 || node.value.stdValue !== 1) {
+      // Use actual distribution parameters if available
+      const u = Math.random();
+      const z =
+        Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+      value = node.value.meanValue + node.value.stdValue * z;
 
-      const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-      value = node.value.meanValue + z * node.value.stdValue;
-    } while (value < 0); // Ensure non-negative values
+      // Ensure value is within reasonable bounds
+      const minValue = node.value.meanValue - 3 * node.value.stdValue;
+      const maxValue = node.value.meanValue + 3 * node.value.stdValue;
+      value = Math.max(minValue, Math.min(maxValue, value));
+    } else {
+      // If we have default parameters, use uniform distribution
+      value = Math.random() * 100; // Fallback to reasonable range
+    }
 
     // Use stored category frequencies for weighted selection
     const rand = Math.random();
