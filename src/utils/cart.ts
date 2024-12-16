@@ -136,7 +136,7 @@ function buildDecisionTree(
   maxDepth = 5,
   minSamplesSplit = 5,
   alpha = 0.01,
-  targetFeature: "date" | "value" | "category"
+  targetFeature: "all" | "date" | "value" | "category"
 ): TreeNode {
   const leafNode = createLeafNode(data);
 
@@ -144,36 +144,36 @@ function buildDecisionTree(
     return leafNode;
   }
 
-  // Only consider splits for the target feature
+  // Find the best split across all features if targetFeature is "all"
   let bestSplit;
-  if (targetFeature === "date") {
-    bestSplit = {
-      feature: "date" as const,
-      ...findBestNumericalSplit(data, "date"),
-    };
-  } else if (targetFeature === "value") {
-    bestSplit = {
-      feature: "value" as const,
-      ...findBestNumericalSplit(data, "value"),
-    };
-  } else {
-    bestSplit = {
-      feature: "category" as const,
-      ...findBestCategoricalSplit(data),
-    };
+  if (targetFeature === "all" || targetFeature === "date") {
+    const dateSplit = findBestNumericalSplit(data, "date");
+    bestSplit = { feature: "date", ...dateSplit };
+  }
+  if (targetFeature === "all" || targetFeature === "value") {
+    const valueSplit = findBestNumericalSplit(data, "value");
+    if (!bestSplit || valueSplit.score < bestSplit.score) {
+      bestSplit = { feature: "value", ...valueSplit };
+    }
+  }
+  if (targetFeature === "all" || targetFeature === "category") {
+    const categorySplit = findBestCategoricalSplit(data);
+    if (!bestSplit || categorySplit.score < bestSplit.score) {
+      bestSplit = { feature: "category", ...categorySplit };
+    }
   }
 
   // Create split based on feature
   let leftData: DataPoint[];
   let rightData: DataPoint[];
 
-  if (targetFeature === "category") {
+  if (bestSplit?.feature === "category") {
     const threshold = bestSplit.threshold as string;
-    leftData = data.filter((d) => d.category.localeCompare(threshold) <= 0);
-    rightData = data.filter((d) => d.category.localeCompare(threshold) > 0);
+    leftData = data.filter((d) => d.category === threshold);
+    rightData = data.filter((d) => d.category !== threshold);
   } else {
-    const threshold = bestSplit.threshold as number;
-    if (targetFeature === "date") {
+    const threshold = (bestSplit?.threshold as number) ?? 0;
+    if (bestSplit?.feature === "date") {
       leftData = data.filter((d) => d.date.getTime() <= threshold);
       rightData = data.filter((d) => d.date.getTime() > threshold);
     } else {
@@ -185,15 +185,15 @@ function buildDecisionTree(
   if (
     leftData.length === 0 ||
     rightData.length === 0 ||
-    bestSplit.score >= leafNode.impurity!
+    (bestSplit?.score ?? 0) >= leafNode.impurity!
   ) {
     return leafNode;
   }
 
   const node: TreeNode = {
-    feature: bestSplit.feature,
-    threshold: bestSplit.threshold,
-    impurity: bestSplit.score,
+    feature: bestSplit?.feature as "category" | "date" | "value",
+    threshold: bestSplit?.threshold,
+    impurity: bestSplit?.score,
     samples: data.length,
     value: leafNode.value,
     left: buildDecisionTree(
@@ -239,10 +239,7 @@ function createLeafNode(data: DataPoint[]): TreeNode {
   };
 }
 
-function generateFeatureValue(
-  node: TreeNode,
-  targetFeature: "date" | "value" | "category"
-): DataPoint {
+function generateFeatureValue(node: TreeNode): DataPoint {
   if (!node.value) {
     throw new Error("Node missing value statistics");
   }
@@ -254,44 +251,31 @@ function generateFeatureValue(
     !node.feature ||
     node.threshold === undefined
   ) {
-    if (targetFeature === "date") {
-      const minDate = node.value.dateRange[0].getTime();
-      const maxDate = node.value.dateRange[1].getTime();
-      return {
-        date: new Date(minDate + Math.random() * (maxDate - minDate)),
-        value: 0,
-        category: "",
-      };
-    } else if (targetFeature === "value") {
-      // Use truncated normal distribution for values
-      let value;
-      do {
-        value = d3.randomNormal(node.value.meanValue, node.value.stdValue)();
-      } while (value < 0);
-      return {
-        date: new Date(),
-        value,
-        category: "",
-      };
-    } else {
-      const categories = node.value.category.split(",");
-      return {
-        date: new Date(),
-        value: 0,
-        category: categories[Math.floor(Math.random() * categories.length)],
-      };
-    }
+    const date = new Date(
+      node.value.dateRange[0].getTime() +
+        Math.random() *
+          (node.value.dateRange[1].getTime() -
+            node.value.dateRange[0].getTime())
+    );
+    const value = Math.max(
+      0,
+      d3.randomNormal(node.value.meanValue, node.value.stdValue)()
+    );
+    const categories = node.value.category.split(",");
+    const category = categories[Math.floor(Math.random() * categories.length)];
+
+    return { date, value, category };
   }
 
   // For non-leaf nodes, make decision based on threshold
   let goLeft: boolean;
-  if (targetFeature === "date") {
+  if (node.feature === "date") {
     const currentTime =
       node.value.dateRange[0].getTime() +
       Math.random() *
         (node.value.dateRange[1].getTime() - node.value.dateRange[0].getTime());
     goLeft = currentTime <= (node.threshold as number);
-  } else if (targetFeature === "value") {
+  } else if (node.feature === "value") {
     const currentValue = d3.randomNormal(
       node.value.meanValue,
       node.value.stdValue
@@ -301,34 +285,24 @@ function generateFeatureValue(
     const categories = node.value.category.split(",");
     const currentCategory =
       categories[Math.floor(Math.random() * categories.length)];
-    goLeft = currentCategory <= (node.threshold as string);
+    goLeft = currentCategory === (node.threshold as string);
   }
 
-  return generateFeatureValue(goLeft ? node.left : node.right, targetFeature);
+  return generateFeatureValue(goLeft ? node.left : node.right);
 }
 
 export function generateSyntheticData(
   realData: DataPoint[],
   targetSize: number
 ): DataPoint[] {
-  // Build separate trees with different parameters for each feature
-  const dateTree = buildDecisionTree(realData, 0, 6, 3, 0.005, "date");
-  const valueTree = buildDecisionTree(realData, 0, 8, 4, 0.01, "value");
-  const categoryTree = buildDecisionTree(realData, 0, 4, 2, 0.02, "category");
+  // Build a single tree considering all features
+  const tree = buildDecisionTree(realData, 0, 6, 3, 0.005, "all");
 
   const syntheticData: DataPoint[] = [];
 
   for (let i = 0; i < targetSize; i++) {
-    // Generate each feature independently
-    const datePoint = generateFeatureValue(dateTree, "date");
-    const valuePoint = generateFeatureValue(valueTree, "value");
-    const categoryPoint = generateFeatureValue(categoryTree, "category");
-
-    syntheticData.push({
-      date: datePoint.date,
-      value: valuePoint.value,
-      category: categoryPoint.category,
-    });
+    // Generate a synthetic data point by traversing the tree
+    syntheticData.push(generateFeatureValue(tree));
   }
 
   return syntheticData;
