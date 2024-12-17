@@ -12,6 +12,66 @@ function getInitialDateRange(data: DataPoint[]): [Date, Date] {
   return [d3.min(dates) || new Date(), d3.max(dates) || new Date()];
 }
 
+function calculateStats(
+  data: DataPoint[],
+  dateRange: [Date, Date],
+  categories: string[]
+) {
+  const filteredData = data.filter(
+    (d) =>
+      categories.includes(d.category) &&
+      d.date >= dateRange[0] &&
+      d.date <= dateRange[1]
+  );
+
+  const stats = {
+    total: d3.sum(filteredData, (d) => d.value),
+    average: d3.mean(filteredData, (d) => d.value) || 0,
+    median: d3.median(filteredData, (d) => d.value) || 0,
+    min: d3.min(filteredData, (d) => d.value) || 0,
+    max: d3.max(filteredData, (d) => d.value) || 0,
+    byCategory: new Map<
+      string,
+      {
+        total: number;
+        average: number;
+        trend: "up" | "down" | "stable";
+      }
+    >(),
+  };
+
+  // Calculate per-category statistics
+  categories.forEach((category) => {
+    const categoryData = filteredData.filter((d) => d.category === category);
+    if (categoryData.length === 0) return;
+
+    // Sort by date for trend calculation
+    const sorted = [...categoryData].sort(
+      (a, b) => a.date.getTime() - b.date.getTime()
+    );
+    const firstHalf = sorted.slice(0, Math.floor(sorted.length / 2));
+    const secondHalf = sorted.slice(Math.floor(sorted.length / 2));
+
+    const firstHalfAvg = d3.mean(firstHalf, (d) => d.value) || 0;
+    const secondHalfAvg = d3.mean(secondHalf, (d) => d.value) || 0;
+
+    const trend =
+      secondHalfAvg > firstHalfAvg * 1.05
+        ? "up"
+        : secondHalfAvg < firstHalfAvg * 0.95
+        ? "down"
+        : "stable";
+
+    stats.byCategory.set(category, {
+      total: d3.sum(categoryData, (d) => d.value) || 0,
+      average: d3.mean(categoryData, (d) => d.value) || 0,
+      trend,
+    });
+  });
+
+  return stats;
+}
+
 function Charts({ data }: ChartsProps) {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([
     "A",
@@ -488,8 +548,91 @@ function Charts({ data }: ChartsProps) {
         </div>
 
         <div className="border rounded-lg p-4 bg-white">
-          <h3 className="text-lg font-bold mb-2">Statistics</h3>
-          {/* Add statistics or another visualization here */}
+          <h3 className="text-lg font-bold mb-4">Statistics</h3>
+          {(() => {
+            const stats = calculateStats(data, dateRange, selectedCategories);
+            return (
+              <div className="space-y-4">
+                {/* Overall Statistics */}
+                <div>
+                  <h4 className="font-semibold text-gray-700 mb-2">Overall</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="text-gray-600">Total:</span>{" "}
+                      {stats.total.toFixed(1)}
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="text-gray-600">Average:</span>{" "}
+                      {stats.average.toFixed(1)}
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="text-gray-600">Median:</span>{" "}
+                      {stats.median.toFixed(1)}
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <span className="text-gray-600">Range:</span>{" "}
+                      {stats.min.toFixed(1)} - {stats.max.toFixed(1)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category Statistics */}
+                <div>
+                  <h4 className="font-semibold text-gray-700 mb-2">
+                    By Category
+                  </h4>
+                  <div className="space-y-2">
+                    {Array.from(stats.byCategory.entries()).map(
+                      ([category, catStats]) => (
+                        <div key={category} className="bg-gray-50 p-2 rounded">
+                          <div className="flex justify-between items-center">
+                            <span className="font-medium">
+                              Category {category}
+                            </span>
+                            <span
+                              className={`text-sm ${
+                                catStats.trend === "up"
+                                  ? "text-green-600"
+                                  : catStats.trend === "down"
+                                  ? "text-red-600"
+                                  : "text-gray-600"
+                              }`}
+                            >
+                              {catStats.trend === "up"
+                                ? "↑"
+                                : catStats.trend === "down"
+                                ? "↓"
+                                : "→"}
+                            </span>
+                          </div>
+                          <div className="text-sm mt-1">
+                            <div>Total: {catStats.total.toFixed(1)}</div>
+                            <div>Average: {catStats.average.toFixed(1)}</div>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+
+                {/* Date Range Info */}
+                <div className="text-sm text-gray-600 mt-2">
+                  <div>
+                    Period: {dateRange[0].toLocaleDateString()} -{" "}
+                    {dateRange[1].toLocaleDateString()}
+                  </div>
+                  <div>
+                    Duration:{" "}
+                    {Math.round(
+                      (dateRange[1].getTime() - dateRange[0].getTime()) /
+                        (1000 * 60 * 60 * 24)
+                    )}{" "}
+                    days
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
