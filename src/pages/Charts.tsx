@@ -98,7 +98,7 @@ function Charts({ data }: ChartsProps) {
 
     // Get the container width and determine if we're on a small screen
     const containerWidth = sliderRef.current.parentElement?.clientWidth || 800;
-    const isSmallScreen = containerWidth < 640; // Tailwind's sm breakpoint
+    const isSmallScreen = containerWidth < 640;
 
     const margin = {
       top: 10,
@@ -128,6 +128,29 @@ function Charts({ data }: ChartsProps) {
 
     const x = d3.scaleTime().domain([minDate, maxDate]).range([0, width]);
 
+    // Create axis with proper typing
+    const axis = d3
+      .axisBottom(x)
+      .tickFormat(d3.timeFormat(isSmallScreen ? "%b" : "%b %Y"))
+      .ticks(isSmallScreen ? 4 : width > 800 ? 10 : 6);
+
+    // Add axis to SVG
+    svg
+      .append("g")
+      .attr("class", "axis")
+      .attr("transform", `translate(0,${height})`)
+      .call(axis as any)
+      .style("font-size", isSmallScreen ? "10px" : "12px");
+
+    // Background with rounded corners
+    svg
+      .append("rect")
+      .attr("class", "slider-background")
+      .attr("width", width)
+      .attr("height", height)
+      .attr("fill", "#f0f0f0")
+      .attr("rx", 6);
+
     // Enhanced brush with touch support
     const brush = d3
       .brushX()
@@ -150,29 +173,7 @@ function Charts({ data }: ChartsProps) {
         }
       });
 
-    // Background with rounded corners
-    svg
-      .append("rect")
-      .attr("class", "slider-background")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("fill", "#f0f0f0")
-      .attr("rx", 6);
-
     const brushGroup = svg.append("g").attr("class", "brush").call(brush);
-
-    // Responsive axis with fewer ticks on small screens
-    const axis = d3
-      .axisBottom(x)
-      .tickFormat(d3.timeFormat(isSmallScreen ? "%b" : "%b %Y") as any)
-      .ticks(isSmallScreen ? 4 : width > 800 ? 10 : 6);
-
-    svg
-      .append("g")
-      .attr("class", "axis")
-      .attr("transform", `translate(0,${height})`)
-      .call(axis)
-      .style("font-size", isSmallScreen ? "10px" : "12px");
 
     // Set initial selection
     const initialSelection: [number, number] = [
@@ -220,15 +221,15 @@ function Charts({ data }: ChartsProps) {
           `0 0 ${newWidth} ${height + margin.top + margin.bottom}`
         );
 
-      // Update axis ticks
+      // Update axis
       axis
         .ticks(isSmall ? 4 : newWidth > 800 ? 10 : 6)
-        .tickFormat(d3.timeFormat(isSmall ? "%b" : "%b %Y") as any);
+        .tickFormat(d3.timeFormat(isSmall ? "%b" : "%b %Y"));
 
       svg
         .select(".axis")
         .style("font-size", isSmall ? "10px" : "12px")
-        .call(axis);
+        .call(axis as any);
     });
 
     resizeObserver.observe(sliderRef.current);
