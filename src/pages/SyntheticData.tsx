@@ -550,32 +550,6 @@ function DistributionChart({
       yAxis = g.append("g").call(d3.axisLeft(y));
     }
 
-    // Add legend
-    const legend = g
-      .append("g")
-      .attr("font-family", "sans-serif")
-      .attr("font-size", 10)
-      .attr("text-anchor", "start")
-      .selectAll("g")
-      .data(["Original", "Synthetic"])
-      .join("g")
-      .attr("transform", (d, i) => `translate(0,${i * 20})`);
-
-    legend
-      .append("rect")
-      .attr("x", width - 19)
-      .attr("width", 19)
-      .attr("height", 19)
-      .attr("fill", (d, i) => (i === 0 ? "blue" : "red"))
-      .attr("fill-opacity", 0.3);
-
-    legend
-      .append("text")
-      .attr("x", width - 24)
-      .attr("y", 9.5)
-      .attr("dy", "0.32em")
-      .text((d) => d);
-
     // Update y-axis label to show percentage
     g.append("text")
       .attr("transform", "rotate(-90)")
@@ -584,9 +558,58 @@ function DistributionChart({
       .attr("dy", "1em")
       .style("text-anchor", "middle")
       .text("Percentage (%)");
+
+    // Update legend container selection to use the outer container
+    const legendContainer = d3.select(chartRef.current.closest('.chart-container'))
+      .append('div')
+      .style('position', 'absolute')
+      .style('top', '10px')
+      .style('right', '10px')
+      .style('background', 'white')
+      .style('padding', '10px')
+      .style('border', '1px solid #ddd')
+      .style('border-radius', '4px')
+      .style('box-shadow', '0 2px 4px rgba(0,0,0,0.1)')
+      .style('z-index', '1000')
+      .style('pointer-events', 'none');
+
+    // Add legend items
+    const legendItems = legendContainer
+      .selectAll('.legend-item')
+      .data(['Original', 'Synthetic'])
+      .enter()
+      .append('div')
+      .attr('class', 'legend-item')
+      .style('display', 'flex')
+      .style('align-items', 'center')
+      .style('margin-bottom', '5px');
+
+    legendItems
+      .append('div')
+      .style('width', '12px')
+      .style('height', '12px')
+      .style('margin-right', '8px')
+      .style('background-color', (d, i) => i === 0 ? 'blue' : 'red')
+      .style('opacity', '0.3');
+
+    legendItems
+      .append('span')
+      .text(d => d)
+      .style('font-size', '12px');
+
+    // Clean up function to remove the legend when component unmounts
+    return () => {
+      legendContainer.remove();
+    };
   }, [originalColumn, syntheticColumn]);
 
-  return <svg ref={chartRef} />;
+  return (
+    <div className="chart-container relative">
+      <div className="overflow-x-auto">
+        <svg ref={chartRef} />
+      </div>
+    </div>
+  );
 }
 
 function SyntheticData({ data: initialData }: SyntheticDataProps) {
