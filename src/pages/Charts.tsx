@@ -131,7 +131,9 @@ function Charts({ data }: ChartsProps) {
     // Create axis with proper typing
     const axis = d3
       .axisBottom(x)
-      .tickFormat(d3.timeFormat(isSmallScreen ? "%b" : "%b %Y"))
+      .tickFormat((d: Date | d3.NumberValue) =>
+        d3.timeFormat(isSmallScreen ? "%b" : "%b %Y")(d as Date)
+      )
       .ticks(isSmallScreen ? 4 : width > 800 ? 10 : 6);
 
     // Add axis to SVG
@@ -224,7 +226,9 @@ function Charts({ data }: ChartsProps) {
       // Update axis
       axis
         .ticks(isSmall ? 4 : newWidth > 800 ? 10 : 6)
-        .tickFormat(d3.timeFormat(isSmall ? "%b" : "%b %Y"));
+        .tickFormat((d: Date | d3.NumberValue) =>
+          d3.timeFormat(isSmall ? "%b" : "%b %Y")(d as Date)
+        );
 
       svg
         .select(".axis")
