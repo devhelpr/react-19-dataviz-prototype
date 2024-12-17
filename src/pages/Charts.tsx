@@ -109,25 +109,34 @@ function Charts({ data }: ChartsProps) {
       .attr("stroke-width", 1)
       .style("pointer-events", "all");
 
-    brushGroup
-      .select(".overlay")
-      .style("pointer-events", "all");
+    brushGroup.select(".overlay").style("pointer-events", "all");
   }, [data]);
 
   // Main chart effect
   useEffect(() => {
     if (!svgRef.current) return;
 
+    const container = svgRef.current.parentElement;
+    if (!container) return;
+
     d3.select(svgRef.current).selectAll("*").remove();
 
     const margin = { top: 20, right: 100, bottom: 50, left: 60 };
-    const width = 800 - margin.left - margin.right;
+    const width =
+      Math.max(800, container.clientWidth) - margin.left - margin.right;
     const height = 400 - margin.top - margin.bottom;
 
     const svg = d3
       .select(svgRef.current)
-      .attr("width", width + margin.left + margin.right)
+      .attr("width", "100%")
       .attr("height", height + margin.top + margin.bottom)
+      .attr(
+        "viewBox",
+        `0 0 ${width + margin.left + margin.right} ${
+          height + margin.top + margin.bottom
+        }`
+      )
+      .attr("preserveAspectRatio", "xMidYMid meet")
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -224,20 +233,27 @@ function Charts({ data }: ChartsProps) {
     });
   }, [data, selectedCategories, chartType, dateRange]);
 
-  // Pie chart effect
+  // Update pie chart effect
   useEffect(() => {
     if (!pieRef.current) return;
 
+    const container = pieRef.current.parentElement;
+    if (!container) return;
+
     d3.select(pieRef.current).selectAll("*").remove();
 
-    const width = 300;
-    const height = 300;
-    const radius = Math.min(width, height) / 2;
+    // Make size responsive to container
+    const containerWidth = container.clientWidth;
+    const width = Math.min(containerWidth, 400); // Max width of 400px
+    const height = width; // Keep it square
+    const radius = Math.min(width, height) / 2.5; // Slightly smaller radius for labels
 
     const svg = d3
       .select(pieRef.current)
-      .attr("width", width)
+      .attr("width", "100%")
       .attr("height", height)
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .attr("preserveAspectRatio", "xMidYMid meet")
       .append("g")
       .attr("transform", `translate(${width / 2},${height / 2})`);
 
@@ -260,24 +276,86 @@ function Charts({ data }: ChartsProps) {
       .innerRadius(0)
       .outerRadius(radius);
 
+    // Add outer arc for labels
+    const outerArc = d3
+      .arc<d3.PieArcDatum<[string, number]>>()
+      .innerRadius(radius * 1.1)
+      .outerRadius(radius * 1.1);
+
     const colorScale = d3
       .scaleOrdinal<string>()
       .domain(["A", "B", "C"])
       .range(["#ff6b6b", "#4ecdc4", "#45b7d1"]);
 
-    svg
+    // Add slices
+    const slices = svg
       .selectAll("path")
       .data(pieData)
       .enter()
       .append("path")
       .attr("d", arc)
-      .attr("fill", (d) => colorScale(d.data[0]));
+      .attr("fill", (d) => colorScale(d.data[0]))
+      .attr("stroke", "white")
+      .style("stroke-width", "2px");
+
+    // Add labels with lines
+    const labels = svg
+      .selectAll("text")
+      .data(pieData)
+      .enter()
+      .append("text")
+      .attr("dy", ".35em")
+      .text((d) => `${d.data[0]}: ${d.data[1].toFixed(1)}`)
+      .attr("transform", (d) => {
+        const pos = outerArc.centroid(d);
+        const midAngle = d.startAngle + (d.endAngle - d.startAngle) / 2;
+        pos[0] = radius * 1.2 * (midAngle < Math.PI ? 1 : -1);
+        return `translate(${pos})`;
+      })
+      .style("text-anchor", (d) => {
+        const midAngle = d.startAngle + (d.endAngle - d.startAngle) / 2;
+        return midAngle < Math.PI ? "start" : "end";
+      })
+      .style("font-size", "12px");
+
+    // Add lines connecting slices to labels
+    svg
+      .selectAll("polyline")
+      .data(pieData)
+      .enter()
+      .append("polyline")
+      .attr("points", (d) => {
+        const pos = outerArc.centroid(d);
+        const midAngle = d.startAngle + (d.endAngle - d.startAngle) / 2;
+        pos[0] = radius * 1.2 * (midAngle < Math.PI ? 1 : -1);
+        return [arc.centroid(d), outerArc.centroid(d), pos].join(",");
+      })
+      .style("fill", "none")
+      .style("stroke", "#999")
+      .style("stroke-width", "1px");
+
+    // Add resize observer
+    const resizeObserver = new ResizeObserver(() => {
+      if (!container) return;
+      const newWidth = Math.min(container.clientWidth, 400);
+      svg
+        .attr("width", newWidth)
+        .attr("height", newWidth)
+        .attr("viewBox", `0 0 ${newWidth} ${newWidth}`);
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
   }, [data, selectedCategories, dateRange]);
 
   return (
-    <div className="p-4">
-      <div className="mb-4">
-        <h2 className="text-xl font-bold mb-2">Chart Controls</h2>
+    <div className="p-4 w-full">
+      <div className="mb-6">
+        <h2 className="text-xl font-bold mb-4">Chart Controls</h2>
+
         <div className="mb-4">
           <h3 className="text-md font-semibold mb-2">Time Range</h3>
           <div className="border p-2 rounded w-full">
@@ -290,8 +368,9 @@ function Charts({ data }: ChartsProps) {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="space-x-2">
+
+        <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-2">
             {["A", "B", "C"].map((category) => (
               <label key={category} className="inline-flex items-center">
                 <input
@@ -316,7 +395,7 @@ function Charts({ data }: ChartsProps) {
             <select
               value={chartType}
               onChange={(e) => setChartType(e.target.value as "line" | "bar")}
-              className="border p-1"
+              className="border p-1 rounded"
             >
               <option value="line">Line Chart</option>
               <option value="bar">Area Chart</option>
@@ -325,14 +404,26 @@ function Charts({ data }: ChartsProps) {
         </div>
       </div>
 
-      <div className="flex gap-4">
-        <div className="border p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="lg:col-span-2 border rounded-lg p-4 bg-white">
           <h3 className="text-lg font-bold mb-2">Time Series Chart</h3>
-          <svg ref={svgRef}></svg>
+          <div className="overflow-x-auto">
+            <div className="min-w-[800px]">
+              <svg ref={svgRef} className="w-full"></svg>
+            </div>
+          </div>
         </div>
-        <div className="border p-4">
+
+        <div className="border rounded-lg p-4 bg-white">
           <h3 className="text-lg font-bold mb-2">Distribution Pie Chart</h3>
-          <svg ref={pieRef}></svg>
+          <div className="flex justify-center">
+            <svg ref={pieRef}></svg>
+          </div>
+        </div>
+
+        <div className="border rounded-lg p-4 bg-white">
+          <h3 className="text-lg font-bold mb-2">Statistics</h3>
+          {/* Add statistics or another visualization here */}
         </div>
       </div>
     </div>
