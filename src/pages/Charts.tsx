@@ -6,6 +6,12 @@ interface ChartsProps {
   data: DataPoint[];
 }
 
+// Helper function to get initial date range
+function getInitialDateRange(data: DataPoint[]): [Date, Date] {
+  const dates = data.map((d) => d.date);
+  return [d3.min(dates) || new Date(), d3.max(dates) || new Date()];
+}
+
 function Charts({ data }: ChartsProps) {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([
     "A",
@@ -13,32 +19,40 @@ function Charts({ data }: ChartsProps) {
     "C",
   ]);
   const [chartType, setChartType] = useState<"line" | "bar">("line");
-  const [dateRange, setDateRange] = useState<[Date, Date]>(() => {
-    const dates = data.map((d) => d.date);
-    return [d3.min(dates) || new Date(), d3.max(dates) || new Date()];
-  });
+  const [dateRange, setDateRange] = useState<[Date, Date]>(() =>
+    getInitialDateRange(data)
+  );
+
+  // Store the last brush selection to prevent unnecessary updates
+  const lastBrushRef = useRef<[Date, Date]>(dateRange);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const pieRef = useRef<SVGSVGElement>(null);
   const sliderRef = useRef<SVGSVGElement>(null);
 
-  // Slider effect
+  // Update slider effect
   useEffect(() => {
     if (!sliderRef.current) return;
 
     d3.select(sliderRef.current).selectAll("*").remove();
 
-    // Get the container width
+    // Get the container width and determine if we're on a small screen
     const containerWidth = sliderRef.current.parentElement?.clientWidth || 800;
+    const isSmallScreen = containerWidth < 640; // Tailwind's sm breakpoint
 
-    const margin = { top: 10, right: 20, bottom: 20, left: 20 };
+    const margin = {
+      top: 10,
+      right: isSmallScreen ? 10 : 20,
+      bottom: isSmallScreen ? 25 : 20,
+      left: isSmallScreen ? 10 : 20,
+    };
     const width = containerWidth - margin.left - margin.right;
-    const height = 100 - margin.top - margin.bottom;
+    const height = isSmallScreen ? 60 : 100 - margin.top - margin.bottom;
 
     // Create responsive SVG
     const svg = d3
       .select(sliderRef.current)
-      .attr("width", "100%") // Make SVG responsive
+      .attr("width", "100%")
       .attr("height", height + margin.top + margin.bottom)
       .attr(
         "viewBox",
@@ -54,6 +68,7 @@ function Charts({ data }: ChartsProps) {
 
     const x = d3.scaleTime().domain([minDate, maxDate]).range([0, width]);
 
+    // Enhanced brush with touch support
     const brush = d3
       .brushX()
       .extent([
@@ -64,52 +79,103 @@ function Charts({ data }: ChartsProps) {
         if (!event.selection) return;
         const [x0, x1] = event.selection;
         const newDates: [Date, Date] = [x.invert(x0), x.invert(x1)];
-        setDateRange(newDates);
+
+        // Only update if the dates have actually changed
+        if (
+          newDates[0].getTime() !== lastBrushRef.current[0].getTime() ||
+          newDates[1].getTime() !== lastBrushRef.current[1].getTime()
+        ) {
+          lastBrushRef.current = newDates;
+          setDateRange(newDates);
+        }
       });
 
+    // Background with rounded corners
     svg
       .append("rect")
       .attr("class", "slider-background")
       .attr("width", width)
       .attr("height", height)
       .attr("fill", "#f0f0f0")
-      .attr("rx", 4);
+      .attr("rx", 6);
 
     const brushGroup = svg.append("g").attr("class", "brush").call(brush);
 
+    // Responsive axis with fewer ticks on small screens
     const axis = d3
       .axisBottom(x)
-      .tickFormat(d3.timeFormat("%b %Y") as any)
-      .ticks(width > 800 ? 10 : 6);
+      .tickFormat(d3.timeFormat(isSmallScreen ? "%b" : "%b %Y") as any)
+      .ticks(isSmallScreen ? 4 : width > 800 ? 10 : 6);
 
     svg
       .append("g")
       .attr("class", "axis")
       .attr("transform", `translate(0,${height})`)
-      .call(axis);
+      .call(axis)
+      .style("font-size", isSmallScreen ? "10px" : "12px");
 
+    // Set initial selection
     const initialSelection: [number, number] = [
       x(dateRange[0]),
       x(dateRange[1]),
     ];
     brushGroup.call(brush.move, initialSelection);
 
+    // Enhanced handle styling
     brushGroup
       .selectAll(".handle")
       .attr("fill", "#4ecdc4")
       .attr("stroke", "#2c8c85")
-      .attr("stroke-width", 1)
-      .style("pointer-events", "all");
+      .attr("stroke-width", 1.5)
+      .attr("rx", 3)
+      .style("pointer-events", "all")
+      .style("touch-action", "none");
 
+    // Enhanced selection styling
     brushGroup
       .selectAll(".selection")
       .attr("fill", "#4ecdc4")
       .attr("fill-opacity", 0.2)
       .attr("stroke", "#4ecdc4")
-      .attr("stroke-width", 1)
-      .style("pointer-events", "all");
+      .attr("stroke-width", 1.5)
+      .attr("rx", 3)
+      .style("pointer-events", "all")
+      .style("touch-action", "none");
 
-    brushGroup.select(".overlay").style("pointer-events", "all");
+    // Make overlay more touch-friendly
+    brushGroup
+      .select(".overlay")
+      .style("pointer-events", "all")
+      .style("touch-action", "none");
+
+    // Add resize observer
+    const resizeObserver = new ResizeObserver(() => {
+      const newWidth = sliderRef.current?.parentElement?.clientWidth || 800;
+      const isSmall = newWidth < 640;
+
+      d3.select(sliderRef.current)
+        .attr("width", "100%")
+        .attr(
+          "viewBox",
+          `0 0 ${newWidth} ${height + margin.top + margin.bottom}`
+        );
+
+      // Update axis ticks
+      axis
+        .ticks(isSmall ? 4 : newWidth > 800 ? 10 : 6)
+        .tickFormat(d3.timeFormat(isSmall ? "%b" : "%b %Y") as any);
+
+      svg
+        .select(".axis")
+        .style("font-size", isSmall ? "10px" : "12px")
+        .call(axis);
+    });
+
+    resizeObserver.observe(sliderRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
   }, [data]);
 
   // Main chart effect
@@ -358,9 +424,9 @@ function Charts({ data }: ChartsProps) {
 
         <div className="mb-4">
           <h3 className="text-md font-semibold mb-2">Time Range</h3>
-          <div className="border p-2 rounded w-full">
+          <div className="border p-2 rounded w-full touch-pan-x">
             <div className="w-full overflow-hidden">
-              <svg ref={sliderRef}></svg>
+              <svg ref={sliderRef} className="w-full touch-pan-x"></svg>
             </div>
             <div className="text-sm text-gray-600 mt-1 flex justify-between">
               <span>{dateRange[0].toLocaleDateString()}</span>
